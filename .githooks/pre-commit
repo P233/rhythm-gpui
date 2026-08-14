@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Formats staged files in place and re-stages them, so what lands in the commit
+# is what `cargo fmt --check` accepts in CI.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+# Bypass for one commit:  git commit --no-verify
+set -eo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+rust_files=()
+prettier_files=()
+while IFS= read -r -d '' file; do
+  case "$file" in
+    *.rs) rust_files+=("$file") ;;
+    *.md | *.yml | *.yaml | *.json) prettier_files+=("$file") ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+all_files=("${rust_files[@]}" "${prettier_files[@]}")
+if [ ${#all_files[@]} -eq 0 ]; then
+  exit 0
+fi
+
+contains() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    if [ "$item" = "$needle" ]; then return 0; fi
+  done
+  return 1
+}
+
+# A file with both staged and unstaged changes cannot be re-staged wholesale
+# without dragging the unstaged half into the commit.
+partially_staged=()
+while IFS= read -r -d '' file; do
+  if contains "$file" "${all_files[@]}"; then
+    partially_staged+=("$file")
+  fi
+done < <(git diff --name-only -z)
+
+# Content hashes, not `git diff`: for a partially staged file the work tree
+# always differs from the index, which says nothing about what the formatter did.
+before_hashes=()
+for file in "${all_files[@]}"; do
+  before_hashes+=("$(git hash-object -- "$file")")
+done
+
+if [ ${#rust_files[@]} -gt 0 ]; then
+  if ! command -v rustfmt >/dev/null 2>&1; then
+    echo "pre-commit: rustfmt not found; run 'rustup component add rustfmt'" >&2
+    exit 1
+  fi
+  rustfmt "${rust_files[@]}"
+fi
+
+# Optional: Markdown/YAML/JSON are formatted only when Prettier happens to be
+# installed, so a Rust-only toolchain is still enough to contribute.
+if [ ${#prettier_files[@]} -gt 0 ] && command -v prettier >/dev/null 2>&1; then
+  prettier --write --log-level warn "${prettier_files[@]}"
+fi
+
+blocked=()
+index=0
+for file in "${all_files[@]}"; do
+  if [ "$(git hash-object -- "$file")" != "${before_hashes[$index]}" ]; then
+    if contains "$file" "${partially_staged[@]}"; then
+      blocked+=("$file")
+    else
+      git add -- "$file"
+    fi
+  fi
+  index=$((index + 1))
+done
+
+if [ ${#blocked[@]} -gt 0 ]; then
+  echo "pre-commit: reformatted files that were only partially staged:" >&2
+  printf '  %s\n' "${blocked[@]}" >&2
+  echo "Stage the formatting yourself (git add -p) and commit again." >&2
+  exit 1
+fi

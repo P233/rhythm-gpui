@@ -1,0 +1,4 @@
+# `cargo fmt` takes the edition from Cargo.toml, but the pre-commit hook invokes
+# `rustfmt` on individual files, which does not read Cargo.toml. Both must agree.
+edition = "2021"
+newline_style = "Unix"

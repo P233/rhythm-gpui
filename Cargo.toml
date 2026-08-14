@@ -1,0 +1,37 @@
+[package]
+name = "rhythm-gpui"
+description = "Print-inspired vertical rhythm for gpui: baseline offsets computed from real font metrics"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/p233/rhythm-gpui"
+documentation = "https://docs.rs/rhythm-gpui"
+readme = "README.md"
+keywords = ["gpui", "typography", "vertical-rhythm", "baseline", "layout"]
+categories = ["gui", "graphics"]
+authors = ["Peiwen Lu <hi@peiwen.lu>"]
+# README images stay out of the published package; crates.io rewrites the
+# relative link to the repository's raw URL at the published commit.
+exclude = ["assets/", ".github/", ".githooks/", ".gitignore", "rustfmt.toml"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["gpui"]
+# The gpui integration (RhythmGrid, RhythmFont, RhythmDropCap, RhythmStyled,
+# rhythm_overlay).
+# Without it only the dependency-free rhythm math is built.
+gpui = ["dep:gpui"]
+
+[dependencies]
+gpui = { version = "0.2", optional = true }
+
+[dev-dependencies]
+ureq = "2"
+
+[[example]]
+name = "demo"
+required-features = ["gpui"]
