@@ -18,7 +18,7 @@
 //!   renderer that centers `ascent + descent` inside the line height:
 //!
 //!   ```toml
-//!   rhythm-gpui = { version = "0.1", default-features = false }
+//!   rhythm-gpui = { version = "0.2", default-features = false }
 //!   ```
 //!
 //! # Example
@@ -27,16 +27,14 @@
 //! # #[cfg(feature = "gpui")]
 //! use gpui::{div, font, px, prelude::*};
 //! # #[cfg(feature = "gpui")]
-//! use rhythm_gpui::{RhythmFont, RhythmGrid, RhythmStyled};
+//! use rhythm_gpui::{RhythmGrid, RhythmStyled};
 //!
 //! # #[cfg(feature = "gpui")]
 //! fn body(text_system: &gpui::TextSystem) -> impl IntoElement {
 //!     let grid = RhythmGrid::new(px(8.));
-//!     let para = RhythmFont::resolve(text_system, font("Georgia"), px(16.), 3, grid);
+//!     let para = grid.font(text_system, font("Georgia"), px(16.), 3);
 //!     div()
-//!         .rhythm_font(&para)
-//!         .pt(grid.baseline_top(&para, 3))
-//!         .pb(grid.baseline_bottom(&para, 1))
+//!         .rhythm_block(&para, 3, 1)
 //!         .child("Aligned to the grid.")
 //! }
 //! ```

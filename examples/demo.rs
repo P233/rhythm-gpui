@@ -97,18 +97,18 @@ impl FontSet {
         let mut quote_font = font(family);
         quote_font.style = FontStyle::Italic;
 
-        let body = RhythmFont::resolve(text_system, font(family), px(16.), 3, grid);
+        let body = grid.font(text_system, font(family), px(16.), 3);
 
         // Drop cap sunk 3 body lines: size and baseline anchor are solved from
         // the two faces' metrics.
         let mut cap_font = font(family);
         cap_font.weight = FontWeight::BOLD;
-        let drop_cap = RhythmDropCap::resolve(text_system, cap_font, &body, 3);
+        let drop_cap = body.drop_cap(text_system, cap_font, 3);
 
         Self {
-            heading: RhythmFont::resolve(text_system, heading_font, px(36.), 6, grid),
-            quote: RhythmFont::resolve(text_system, quote_font, px(16.), 3, grid),
-            display: RhythmFont::resolve(text_system, font(family), px(22.), 3, grid),
+            heading: grid.font(text_system, heading_font, px(36.), 6),
+            quote: grid.font(text_system, quote_font, px(16.), 3),
+            display: grid.font(text_system, font(family), px(22.), 3),
             body,
             drop_cap,
         }
@@ -417,7 +417,7 @@ impl Demo {
             .flex()
             .items_start()
             .gap(grid.height(3))
-            .mt(grid.baseline_bottom(&self.set.body, 6) - px(max_above))
+            .mt(self.set.body.baseline_bottom(6) - px(max_above))
             .children(spans.map(|(span_font, text, color)| {
                 div()
                     .rhythm_font(span_font)
@@ -443,17 +443,16 @@ impl Render for Demo {
         //   cap_bottom returns the trim so the block still spans whole rows.
         //   Faces without usable cap metrics fall back to the baseline opening.
         let cap_anchors = if self.cap_anchor {
-            grid.cap_top(&self.set.heading, 4)
-                .zip(grid.cap_bottom(&self.set.heading, 0))
+            self.set.heading.cap_span(4, 0)
         } else {
             None
         };
         let (heading_pt, heading_pb, para_mt) = match cap_anchors {
-            Some((pt, pb)) => (pt, pb, grid.baseline_top(&self.set.body, 3)),
+            Some((pt, pb)) => (pt, pb, self.set.body.baseline_top(3)),
             None => (
-                grid.baseline_top(&self.set.heading, 7),
+                self.set.heading.baseline_top(7),
                 px(0.),
-                grid.baseline_between(&self.set.heading, &self.set.body, 6),
+                self.set.heading.baseline_between(&self.set.body, 6),
             ),
         };
         div()
@@ -472,7 +471,7 @@ impl Render for Demo {
                         .child(
                             div()
                                 .px(grid.height(6))
-                                .pb(grid.baseline_bottom(&self.set.body, 3))
+                                .pb(self.set.body.baseline_bottom(3))
                                 .child(
                                     div()
                                         .rhythm_font(&self.set.heading)
@@ -484,22 +483,14 @@ impl Render for Demo {
                                 .child(
                                     div()
                                         .rhythm_font(&self.set.body)
-                                        .mt(grid.baseline_between(
-                                            &self.set.body,
-                                            &self.set.body,
-                                            6,
-                                        ))
+                                        .mt(self.set.body.baseline_between(&self.set.body, 6))
                                         .child(PARA_2),
                                 )
                                 .child(
                                     div()
                                         .rhythm_font(&self.set.quote)
                                         .text_color(rgb(0x57606a))
-                                        .mt(grid.baseline_between(
-                                            &self.set.body,
-                                            &self.set.quote,
-                                            6,
-                                        ))
+                                        .mt(self.set.body.baseline_between(&self.set.quote, 6))
                                         .pl(grid.height(3))
                                         .border_l(px(2.))
                                         .border_color(rgb(0xd0d7de))
@@ -512,11 +503,7 @@ impl Render for Demo {
                                 .child(
                                     div()
                                         .rhythm_font(&self.set.body)
-                                        .mt(grid.baseline_between(
-                                            &self.set.quote,
-                                            &self.set.body,
-                                            6,
-                                        ))
+                                        .mt(self.set.quote.baseline_between(&self.set.body, 6))
                                         .child(PARA_3),
                                 )
                                 .child(self.mixed_font_row()),
@@ -584,8 +571,8 @@ fn main() {
             grid,
             selected: 0,
             set: FontSet::resolve(text_system, CHOICES[0].family, grid),
-            mono: RhythmFont::resolve(text_system, font("Menlo"), px(13.), 3, grid),
-            cjk: RhythmFont::resolve(text_system, font("PingFang SC"), px(16.), 3, grid),
+            mono: grid.font(text_system, font("Menlo"), px(13.), 3),
+            cjk: grid.font(text_system, font("PingFang SC"), px(16.), 3),
             loaded: HashSet::new(),
             loading: None,
             error: None,

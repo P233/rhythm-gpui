@@ -47,78 +47,71 @@ impl RhythmGrid {
         px(self.core().height(n))
     }
 
-    /// Top spacing that lands the first baseline `n` rhythm units below the
-    /// element's padding edge (rhythm-sass `baseline-top()` / `rhythm-bottom()`).
-    ///
-    /// Negative when `n × size` is smaller than the font's
-    /// [`baseline_above`](RhythmFont::baseline_above) — meaningful as a margin,
-    /// not as a padding.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `font` was resolved against a different grid size; its line
-    /// height would no longer match the calculated offsets.
-    pub fn baseline_top(&self, font: &RhythmFont, n: i32) -> Pixels {
-        self.assert_font(font);
-        px(self.core().baseline_top(&font.metrics, n))
+    /// Resolve a font bound to this grid — [`RhythmFont::resolve`] with the
+    /// grid slot filled in; see it for the fallback-resolution caveats.
+    pub fn font(
+        &self,
+        text_system: &TextSystem,
+        font: Font,
+        font_size: Pixels,
+        line_rhythms: u32,
+    ) -> RhythmFont {
+        RhythmFont::resolve(text_system, font, font_size, line_rhythms, *self)
     }
 
-    /// Bottom spacing that puts the nth grid line below the last baseline at the
-    /// element's padding edge (rhythm-sass `baseline-bottom()` / `rhythm-top()`).
-    ///
-    /// Negative when `n × size` is smaller than the font's baseline-to-bottom
-    /// distance — meaningful as a margin, not as a padding.
+    /// Deprecated form of [`RhythmFont::baseline_top`].
     ///
     /// # Panics
     ///
     /// Panics when `font` was resolved against a different grid size.
-    pub fn baseline_bottom(&self, font: &RhythmFont, n: i32) -> Pixels {
+    #[deprecated(since = "0.2.0", note = "use `RhythmFont::baseline_top`")]
+    pub fn baseline_top(&self, font: &RhythmFont, n: i32) -> Pixels {
         self.assert_font(font);
-        px(self.core().baseline_bottom(&font.metrics, n))
+        font.baseline_top(n)
     }
 
-    /// Spacing between two stacked text blocks so their adjacent baselines are
-    /// exactly `n` rhythm units apart (rhythm-sass `baseline-between()`).
+    /// Deprecated form of [`RhythmFont::baseline_bottom`].
     ///
-    /// gpui's flex layout never collapses margins, so apply the result to exactly
-    /// one side (or as a `gap`), unlike the CSS original. Negative results
-    /// overlap the blocks when applied.
+    /// # Panics
+    ///
+    /// Panics when `font` was resolved against a different grid size.
+    #[deprecated(since = "0.2.0", note = "use `RhythmFont::baseline_bottom`")]
+    pub fn baseline_bottom(&self, font: &RhythmFont, n: i32) -> Pixels {
+        self.assert_font(font);
+        font.baseline_bottom(n)
+    }
+
+    /// Deprecated form of [`RhythmFont::baseline_between`].
     ///
     /// # Panics
     ///
     /// Panics when `above` or `below` was resolved against a different grid size.
+    #[deprecated(since = "0.2.0", note = "use `RhythmFont::baseline_between`")]
     pub fn baseline_between(&self, above: &RhythmFont, below: &RhythmFont, n: i32) -> Pixels {
         self.assert_font(above);
-        self.assert_font(below);
-        px(self
-            .core()
-            .baseline_between(&above.metrics, &below.metrics, n))
+        above.baseline_between(below, n)
     }
 
-    /// Top spacing that lands the capitals' ink top — not the baseline — on
-    /// the nth grid line, for optically-aligned openings. Close the block with
-    /// [`Self::cap_bottom`], not [`Self::baseline_bottom`]; see
-    /// [`Rhythm::cap_top`] for the contract. `None` when the font has no
-    /// usable cap height.
+    /// Deprecated form of [`RhythmFont::cap_top`].
     ///
     /// # Panics
     ///
     /// Panics when `font` was resolved against a different grid size.
+    #[deprecated(since = "0.2.0", note = "use `RhythmFont::cap_top`")]
     pub fn cap_top(&self, font: &RhythmFont, n: i32) -> Option<Pixels> {
         self.assert_font(font);
-        self.core().cap_top(&font.metrics, n).map(px)
+        font.cap_top(n)
     }
 
-    /// Bottom spacing pairing [`Self::cap_top`], returning the trimmed space
-    /// so the block closes on whole rhythm rows; see [`Rhythm::cap_bottom`].
-    /// `None` when the font has no usable cap height.
+    /// Deprecated form of [`RhythmFont::cap_bottom`].
     ///
     /// # Panics
     ///
     /// Panics when `font` was resolved against a different grid size.
+    #[deprecated(since = "0.2.0", note = "use `RhythmFont::cap_bottom`")]
     pub fn cap_bottom(&self, font: &RhythmFont, m: i32) -> Option<Pixels> {
         self.assert_font(font);
-        self.core().cap_bottom(&font.metrics, m).map(px)
+        font.cap_bottom(m)
     }
 }
 
@@ -200,6 +193,104 @@ impl RhythmFont {
     /// [`RhythmStyled::rhythm_font`].
     pub fn font(&self) -> &Font {
         &self.font
+    }
+
+    /// The grid this font was resolved against.
+    pub const fn grid(&self) -> RhythmGrid {
+        self.grid
+    }
+
+    /// Top spacing that lands the first baseline `n` rhythm units below the
+    /// element's padding edge (rhythm-sass `baseline-top()` / `rhythm-bottom()`).
+    ///
+    /// Negative when `n × grid size` is smaller than
+    /// [`baseline_above`](Self::baseline_above) — meaningful as a margin, not
+    /// as a padding.
+    pub fn baseline_top(&self, n: i32) -> Pixels {
+        px(self.grid.core().baseline_top(&self.metrics, n))
+    }
+
+    /// Bottom spacing that puts the nth grid line below the last baseline at
+    /// the element's padding edge (rhythm-sass `baseline-bottom()` /
+    /// `rhythm-top()`).
+    ///
+    /// Negative when `n × grid size` is smaller than the baseline-to-bottom
+    /// distance — meaningful as a margin, not as a padding.
+    pub fn baseline_bottom(&self, n: i32) -> Pixels {
+        px(self.grid.core().baseline_bottom(&self.metrics, n))
+    }
+
+    /// Spacing from a block set in this font down to a following block set in
+    /// `below`, so the two adjacent baselines are exactly `n` rhythm units
+    /// apart (rhythm-sass `baseline-between()`).
+    ///
+    /// gpui's flex layout never collapses margins, so apply the result to
+    /// exactly one side (or as a `gap`), unlike the CSS original. Negative
+    /// results overlap the blocks when applied.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `below` was resolved against a different grid size; its
+    /// line height would no longer match the calculated spacing.
+    pub fn baseline_between(&self, below: &RhythmFont, n: i32) -> Pixels {
+        assert_eq!(
+            self.grid, below.grid,
+            "both fonts must be resolved against the same grid size"
+        );
+        px(self
+            .grid
+            .core()
+            .baseline_between(&self.metrics, &below.metrics, n))
+    }
+
+    /// Top spacing that lands the capitals' ink top — not the baseline — on
+    /// the nth grid line, for optically-aligned openings. Close the block
+    /// with [`Self::cap_bottom`], not [`Self::baseline_bottom`]; see
+    /// [`Rhythm::cap_top`] for the contract, or use [`Self::cap_span`] to get
+    /// the pair in one call. `None` when the font has no usable cap height.
+    pub fn cap_top(&self, n: i32) -> Option<Pixels> {
+        self.grid.core().cap_top(&self.metrics, n).map(px)
+    }
+
+    /// Bottom spacing pairing [`Self::cap_top`], returning the trimmed space
+    /// so the block closes on whole rhythm rows; see [`Rhythm::cap_bottom`].
+    /// `None` when the font has no usable cap height.
+    pub fn cap_bottom(&self, m: i32) -> Option<Pixels> {
+        self.grid.core().cap_bottom(&self.metrics, m).map(px)
+    }
+
+    /// The cap-anchored opening as one paired value:
+    /// `(cap_top(top), cap_bottom(bottom))`. Taking the pair from a single
+    /// call makes the off-grid mistake — a cap opening closed with
+    /// [`Self::baseline_bottom`] — inexpressible.
+    ///
+    /// `None` when the font has no usable cap height. The baseline fallback
+    /// is a design choice (the equivalent baseline count differs from `top`
+    /// by the cap height), so pick it explicitly, e.g. with gpui's `.map()`:
+    ///
+    /// ```no_run
+    /// # use gpui::{div, prelude::*};
+    /// # use rhythm_gpui::RhythmFont;
+    /// # fn opening(heading: &RhythmFont) -> impl IntoElement {
+    /// div().map(|d| match heading.cap_span(4, 0) {
+    ///     Some((pt, pb)) => d.pt(pt).pb(pb),
+    ///     None => d.pt(heading.baseline_top(7)),
+    /// })
+    /// # }
+    /// ```
+    pub fn cap_span(&self, top: i32, bottom: i32) -> Option<(Pixels, Pixels)> {
+        Some((self.cap_top(top)?, self.cap_bottom(bottom)?))
+    }
+
+    /// Resolve `font` as a drop cap sunk `lines` lines deep into text set in
+    /// this font — [`RhythmDropCap::resolve`] with the body slot filled in;
+    /// see it for the solving contract.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `lines` is zero or `lines × line_rhythms` overflows `u32`.
+    pub fn drop_cap(&self, text_system: &TextSystem, font: Font, lines: u32) -> RhythmDropCap {
+        RhythmDropCap::resolve(text_system, font, self, lines)
     }
 
     /// Resolved vertical metrics in logical pixels.
@@ -323,6 +414,37 @@ pub trait RhythmStyled: Styled + Sized {
         self.font(font.font().clone())
             .text_size(font.font_size())
             .line_height(font.line_height())
+    }
+
+    /// The whole text-block recipe in one call: [`Self::rhythm_font`] plus
+    /// the paired paddings that open `top` rhythm units above the first
+    /// baseline and close `bottom` units below the last, so the block
+    /// occupies a whole number of rhythm rows for any number of wrapped
+    /// lines and composes freely without breaking the page rhythm.
+    ///
+    /// Paddings go negative when `top`/`bottom` are smaller than the font's
+    /// baseline distances; negative spacing is meaningful as a margin, so
+    /// use [`RhythmFont::baseline_top`] / [`RhythmFont::baseline_bottom`]
+    /// directly for margin-based layouts.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use gpui::{div, font, prelude::*, px, TextSystem};
+    /// use rhythm_gpui::{RhythmGrid, RhythmStyled};
+    ///
+    /// fn card(text_system: &TextSystem) -> impl IntoElement {
+    ///     let grid = RhythmGrid::new(px(8.));
+    ///     let body = grid.font(text_system, font("Georgia"), px(16.), 3);
+    ///     div()
+    ///         .rhythm_block(&body, 3, 1)
+    ///         .child("A block spanning whole rhythm rows.")
+    /// }
+    /// ```
+    fn rhythm_block(self, font: &RhythmFont, top: i32, bottom: i32) -> Self {
+        self.rhythm_font(font)
+            .pt(font.baseline_top(top))
+            .pb(font.baseline_bottom(bottom))
     }
 
     /// Apply a drop cap: the solved font plus its baseline-anchoring relative
@@ -491,8 +613,44 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "same grid size")]
+    fn baseline_between_rejects_fonts_on_different_grids() {
+        let above = RhythmFont::from_baseline_ratio(
+            font("Example Serif"),
+            px(16.0),
+            3,
+            0.2,
+            RhythmGrid::new(px(8.0)),
+        );
+        let below = RhythmFont::from_baseline_ratio(
+            font("Example Serif"),
+            px(16.0),
+            3,
+            0.2,
+            RhythmGrid::new(px(10.0)),
+        );
+
+        above.baseline_between(&below, 3);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn deprecated_grid_spacing_matches_the_font_methods() {
+        let grid = RhythmGrid::new(px(8.0));
+        let body = RhythmFont::from_baseline_ratio(font("Example Serif"), px(16.0), 3, 0.2, grid);
+
+        assert_eq!(grid.baseline_top(&body, 3), body.baseline_top(3));
+        assert_eq!(grid.baseline_bottom(&body, 1), body.baseline_bottom(1));
+        assert_eq!(
+            grid.baseline_between(&body, &body, 6),
+            body.baseline_between(&body, 6)
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
     #[should_panic(expected = "RhythmFont must use the same grid size")]
-    fn spacing_rejects_a_font_bound_to_another_grid() {
+    fn deprecated_spacing_still_rejects_a_mismatched_grid() {
         let font = RhythmFont::from_baseline_ratio(
             font("Example Serif"),
             px(16.0),
@@ -505,12 +663,52 @@ mod tests {
     }
 
     #[test]
+    fn rhythm_block_applies_the_font_and_the_paired_paddings() {
+        let grid = RhythmGrid::new(px(8.0));
+        let body = RhythmFont::from_baseline_ratio(font("Example Serif"), px(16.0), 3, 0.2, grid);
+
+        let captured = CapturedStyle::default().rhythm_block(&body, 3, 1);
+        assert_eq!(
+            captured.style.padding.top,
+            Some(body.baseline_top(3).into())
+        );
+        assert_eq!(
+            captured.style.padding.bottom,
+            Some(body.baseline_bottom(1).into())
+        );
+        let text = captured
+            .style
+            .text
+            .expect("rhythm block should set the text style");
+        assert_eq!(text.font_family, Some("Example Serif".into()));
+    }
+
+    #[test]
+    fn cap_span_pairs_the_anchors_and_spans_whole_rows() {
+        let grid = RhythmGrid::new(px(8.0));
+        // Georgia-like metrics at 16px on a 3-unit line.
+        let metrics = FontRhythm::from_platform_metrics(16.0, 3, 14.67, -3.51, 11.09, 7.70);
+        let heading = RhythmFont {
+            font: font("Example Serif"),
+            metrics,
+            grid,
+        };
+
+        let (pt, pb) = heading.cap_span(3, 0).expect("cap metrics are present");
+        assert_eq!(Some(pt), heading.cap_top(3));
+        assert_eq!(Some(pb), heading.cap_bottom(0));
+        let rows = f32::from(pt + heading.line_height() + pb) / 8.0;
+        assert!((rows - rows.round()).abs() < 1e-3);
+    }
+
+    #[test]
     fn cap_spacing_returns_none_without_cap_height() {
         let grid = RhythmGrid::new(px(8.0));
         let font = RhythmFont::from_baseline_ratio(font("Example Serif"), px(16.0), 3, 0.2, grid);
 
-        assert_eq!(grid.cap_top(&font, 3), None);
-        assert_eq!(grid.cap_bottom(&font, 1), None);
+        assert_eq!(font.cap_top(3), None);
+        assert_eq!(font.cap_bottom(1), None);
+        assert_eq!(font.cap_span(3, 1), None);
     }
 
     #[test]

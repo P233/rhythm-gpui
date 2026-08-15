@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+API reshaped along the ownership chain: a `RhythmFont` already carries its
+grid, so spacing now comes from the font itself and the grid acts as the
+factory. Passing the grid alongside a font — and the runtime mismatch panic
+that guarded it — is gone from the new paths.
+
+- Spacing moved to `RhythmFont`: `font.baseline_top(n)`,
+  `font.baseline_bottom(n)`, `above.baseline_between(&below, n)`,
+  `font.cap_top(n)`, `font.cap_bottom(m)`. The `RhythmGrid` equivalents are
+  deprecated and forward to the new methods.
+- Factory constructors: `grid.font(ts, font, size, line_rhythms)` and
+  `body.drop_cap(ts, font, lines)`. `RhythmFont::resolve` and
+  `RhythmDropCap::resolve` remain as the explicit forms.
+- `RhythmFont::cap_span(top, bottom)` returns the cap-anchored padding pair as
+  one `Option`, making a cap opening closed with a baseline `bottom` — the
+  off-grid mistake the docs used to warn about — inexpressible.
+- `RhythmStyled::rhythm_block(&font, top, bottom)`: the whole-rows text-block
+  recipe (font plus baseline-paired paddings) in one call.
+- `RhythmFont::grid()` accessor.
+
 ## 0.1.0 (2026-08-15)
 
 Initial release: vertical rhythm typography for gpui, ported from

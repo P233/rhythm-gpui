@@ -39,7 +39,7 @@ which is why looking it up per font is no longer necessary.
 
 ```toml
 [dependencies]
-rhythm-gpui = "0.1"
+rhythm-gpui = "0.2"
 ```
 
 The crate has two layers behind one package:
@@ -63,24 +63,24 @@ not declare one.
 
 ```rust
 use gpui::{div, font, px, prelude::*};
-use rhythm_gpui::{RhythmFont, RhythmGrid, RhythmStyled};
+use rhythm_gpui::{RhythmGrid, RhythmStyled};
 
 // 1. Pick a grid unit (the analog of rhythm-sass `$rhythm-size`).
 let grid = RhythmGrid::new(px(8.));
 
-// 2. Bind fonts to the grid. Line height is given in whole rhythm units:
+// 2. Derive fonts from the grid. Line height is given in whole rhythm units:
 //    3 × 8px = 24px. Metrics are resolved from the font file at this size.
-let body = RhythmFont::resolve(cx.text_system(), font("Georgia"), px(16.), 3, grid);
-let heading = RhythmFont::resolve(cx.text_system(), font("Georgia"), px(28.), 5, grid);
+let body = grid.font(cx.text_system(), font("Georgia"), px(16.), 3);
+let heading = grid.font(cx.text_system(), font("Georgia"), px(28.), 5);
 
-// 3. Use the spacing functions wherever gpui expects a length.
+// 3. Spacing comes from the fonts themselves, wherever gpui expects a length.
 div()
-    .pt(grid.baseline_top(&heading, 5))
+    .pt(heading.baseline_top(5))
     .child(div().rhythm_font(&heading).child("Title"))
     .child(
         div()
             .rhythm_font(&body)
-            .mt(grid.baseline_between(&heading, &body, 6))
+            .mt(heading.baseline_between(&body, 6))
             .child("Body text, aligned to the grid."),
     )
 ```
@@ -108,7 +108,7 @@ The demo doubles as a recipe collection:
   with `baseline_bottom` instead would not. Flip the demo's heading toggle to
   compare the two openings live: with the cap anchor, switching typefaces
   keeps the ink pinned while the baseline wobbles, and vice versa.
-- **Drop cap with true wrap-around** — `RhythmDropCap::resolve(ts, font, &body, 3)`
+- **Drop cap with true wrap-around** — `body.drop_cap(ts, font, 3)`
   solves the cap size and baseline anchor from metrics; `.rhythm_drop_cap(&cap)`
   applies the anchor as a relative inset, because for cap-heavy faces (cap
   height > ascent − descent, e.g. Merriweather) the anchor is a _downward_
@@ -134,7 +134,9 @@ The demo doubles as a recipe collection:
 rhythm units. Line heights are whole units by construction; close a
 baseline-anchored block with `baseline_bottom`, or a cap-anchored block with
 the paired `cap_bottom`. Blocks then compose freely without breaking the page
-rhythm.
+rhythm. `.rhythm_block(&font, top, bottom)` applies the baseline-paired recipe
+(font + both paddings) in one call, and `font.cap_span(top, bottom)` hands the
+cap pair as one value so the anchors cannot be mismatched.
 
 ## Development
 
