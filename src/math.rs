@@ -130,6 +130,55 @@ impl Rhythm {
     pub fn cap_bottom(&self, font: &FontRhythm, m: i32) -> Option<f32> {
         Some(self.height(m) + font.cap_trim_top(*self)?)
     }
+
+    /// The smallest whole number of rhythm rows covering `height` — the pad
+    /// strategy for content whose height is not rhythm-controlled (images,
+    /// video, embeds): the block grows to the next grid line and the
+    /// remainder, always under one unit, becomes trailing whitespace.
+    ///
+    /// Heights within a few `f32` rounding steps of a whole-row height count
+    /// as exact, absorbing float error from measured sizes without allowing a
+    /// large rhythm unit to hide a visible remainder. Unlike [`snap`], which
+    /// rounds a final value to the nearest step of an arbitrary size, this
+    /// rounds heights outward to whole rhythm rows.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `height` is negative or non-finite.
+    pub fn snap_up(&self, height: f32) -> f32 {
+        self.size * self.snap_rows(height, f32::ceil)
+    }
+
+    /// The largest whole number of rhythm rows within `height` — the crop
+    /// strategy: the block shrinks to the previous grid line, cutting less
+    /// than one unit and never scaling the content up. Same exactness
+    /// tolerance as [`Self::snap_up`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when `height` is negative or non-finite.
+    pub fn snap_down(&self, height: f32) -> f32 {
+        self.size * self.snap_rows(height, f32::floor)
+    }
+
+    fn snap_rows(&self, height: f32, round_out: fn(f32) -> f32) -> f32 {
+        assert!(
+            height.is_finite() && height >= 0.0,
+            "height must be finite and non-negative"
+        );
+        let rows = height / self.size;
+        let nearest = rows.round();
+        let nearest_height = self.size * nearest;
+        // Division and multiplication can each move an exact multiple by a
+        // few ULPs. Scale by the measured height, not by the grid size, so the
+        // tolerance cannot hide a visible remainder on a large grid.
+        let tolerance = height * f32::EPSILON * 8.0;
+        if (height - nearest_height).abs() <= tolerance {
+            nearest
+        } else {
+            round_out(rows)
+        }
+    }
 }
 
 /// Vertical metrics of one text style participating in the rhythm grid.
@@ -547,6 +596,36 @@ mod tests {
         assert_eq!(snap(5.4, 0.5), 5.5); // 2x display
         assert_eq!(snap(5.4, 1.0), 5.0);
         assert_eq!(snap(-5.4, 0.5), -5.5);
+    }
+
+    #[test]
+    fn snap_heights_to_whole_rows() {
+        assert_eq!(GRID.snap_up(450.0), 456.0); // 800px wide at 16:9
+        assert_eq!(GRID.snap_down(450.0), 448.0);
+        assert_eq!(GRID.snap_up(0.0), 0.0);
+        assert_eq!(GRID.snap_down(7.9), 0.0); // under one row floors to zero
+                                              // Exact multiples pass through both directions.
+        assert_eq!(GRID.snap_up(448.0), 448.0);
+        assert_eq!(GRID.snap_down(448.0), 448.0);
+    }
+
+    #[test]
+    fn snap_heights_absorb_float_error_near_whole_rows() {
+        assert_eq!(GRID.snap_up(448.0002), 448.0);
+        assert_eq!(GRID.snap_down(447.9998), 448.0);
+    }
+
+    #[test]
+    fn snap_tolerance_does_not_scale_with_the_grid_size() {
+        let large_grid = Rhythm::new(1_000_000.0);
+        assert_eq!(large_grid.snap_up(50.0), 1_000_000.0);
+        assert_eq!(large_grid.snap_down(50.0), 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "height must be finite and non-negative")]
+    fn snap_heights_reject_negative_values() {
+        let _ = GRID.snap_up(-1.0);
     }
 
     // Georgia on macOS: upem 2048, hhea 1878/-449, cap 1419, x 986.

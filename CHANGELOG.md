@@ -21,6 +21,20 @@ that guarded it — is gone from the new paths.
   recipe (font plus baseline-paired paddings) in one call.
 - `RhythmFont::grid()` accessor.
 
+Media support — content whose height follows its width (images, video,
+embeds) no longer knocks everything after it off the grid:
+
+- `Rhythm::snap_up` / `snap_down` (and the `Pixels`-typed `RhythmGrid`
+  wrappers): round a free height outward to whole rhythm rows, with a small
+  `f32`-precision tolerance absorbing float error from measured sizes.
+- `rhythm_frame(grid, ratio)`: a fluid-width container that re-snaps its
+  height in the layout pass at every width. Default pads the sub-unit
+  remainder below the content; `.crop()` rounds down and clips natural-height
+  content evenly between its top and bottom edges. The content overlays a
+  measured sizer leaf, so the box reserves its height before an image loads —
+  no layout shift.
+- Demo: a fluid-width image with a pad/crop toolbar toggle.
+
 ## 0.1.0 (2026-08-15)
 
 Initial release: vertical rhythm typography for gpui, ported from

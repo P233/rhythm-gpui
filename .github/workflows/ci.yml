@@ -41,8 +41,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - run: cargo clippy --all-targets --features test-support -- -D warnings
+      - run: cargo test --features test-support
       - run: cargo build --examples
       - run: cargo doc --no-deps
         env:

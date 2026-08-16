@@ -11,8 +11,8 @@
 //! # Feature flags
 //!
 //! - **`gpui`** (default) — the gpui integration: `RhythmGrid`, `RhythmFont`,
-//!   `RhythmDropCap`, the `RhythmStyled` extension trait, and the
-//!   `rhythm_overlay` debug grid.
+//!   `RhythmDropCap`, the `RhythmStyled` extension trait, the `rhythm_frame`
+//!   media container, and the `rhythm_overlay` debug grid.
 //! - Disable default features to build only the dependency-free rhythm math
 //!   ([`Rhythm`], [`FontRhythm`], [`DropCapRhythm`], [`snap`]), usable from any
 //!   renderer that centers `ascent + descent` inside the line height:
@@ -41,8 +41,8 @@
 //!
 //! The repository's `demo` example doubles as a recipe collection: a page
 //! scaffold, baseline- and cap-anchored openings, a drop cap with true
-//! wrap-around, and mixed fonts (sizes, families, scripts) sharing one
-//! alphabetic baseline.
+//! wrap-around, fluid-width media padded or cropped to whole rhythm rows, and
+//! mixed fonts (sizes, families, scripts) sharing one alphabetic baseline.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
@@ -52,7 +52,11 @@ mod math;
 pub use math::{snap, DropCapRhythm, FontRhythm, Rhythm};
 
 #[cfg(feature = "gpui")]
+mod frame;
+#[cfg(feature = "gpui")]
 mod integration;
 
+#[cfg(feature = "gpui")]
+pub use frame::{rhythm_frame, RhythmFrame};
 #[cfg(feature = "gpui")]
 pub use integration::{rhythm_overlay, RhythmDropCap, RhythmFont, RhythmGrid, RhythmStyled};

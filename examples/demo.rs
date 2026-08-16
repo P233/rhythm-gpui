@@ -4,21 +4,24 @@
 //! Showcases metric-derived rhythm: pick any font and every baseline still
 //! lands on the grid, with no per-font `baseline-ratio` lookup. Includes a
 //! three-line drop cap, a mixed-font run (serif, mono, CJK) sharing one
-//! alphabetic baseline, and a toolbar toggle switching the page opening
-//! between a baseline-anchored and a cap-anchored (optical) heading. Fonts
-//! are fetched as TTF via the css2 API (non-browser user agents are served
+//! alphabetic baseline, a fluid-width image in a `rhythm_frame` with a
+//! pad/crop toggle, and a toolbar toggle switching the page opening between
+//! a baseline-anchored and a cap-anchored (optical) heading. Fonts are
+//! fetched as TTF via the css2 API (non-browser user agents are served
 //! `truetype` sources) on the background executor.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::io::Read;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui::{
-    div, font, prelude::*, px, rgb, size, App, Application, Bounds, ClickEvent, Context, FontStyle,
-    FontWeight, Pixels, TextRun, TextSystem, Window, WindowBounds, WindowOptions,
+    div, font, img, prelude::*, px, rgb, size, App, Application, Bounds, ClickEvent, Context,
+    FontStyle, FontWeight, ObjectFit, Pixels, TextRun, TextSystem, Window, WindowBounds,
+    WindowOptions,
 };
-use rhythm_gpui::{RhythmDropCap, RhythmFont, RhythmGrid, RhythmStyled};
+use rhythm_gpui::{rhythm_frame, RhythmDropCap, RhythmFont, RhythmGrid, RhythmStyled};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Source {
@@ -126,6 +129,7 @@ struct Demo {
     error: Option<String>,
     show_grid: bool,
     cap_anchor: bool,
+    crop_media: bool,
 }
 
 impl Demo {
@@ -189,6 +193,11 @@ impl Demo {
 
     fn toggle_anchor(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.cap_anchor = !self.cap_anchor;
+        cx.notify();
+    }
+
+    fn toggle_media(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.crop_media = !self.crop_media;
         cx.notify();
     }
 
@@ -304,6 +313,26 @@ impl Demo {
                             } else {
                                 "Heading: baseline"
                             }),
+                    )
+                    .child(
+                        div()
+                            .id("media-toggle")
+                            .ml_2()
+                            .w(px(96.))
+                            .py_0p5()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .border_1()
+                            .border_color(rgb(0xd0d7de))
+                            .hover(|s| s.bg(rgb(0xe6e8eb)))
+                            .flex()
+                            .justify_center()
+                            .on_click(cx.listener(Self::toggle_media))
+                            .child(if self.crop_media {
+                                "Media: crop"
+                            } else {
+                                "Media: pad"
+                            }),
                     ),
             )
             .child(
@@ -394,6 +423,22 @@ impl Demo {
             )
     }
 
+    /// A fluid-width image on the grid: `rhythm_frame` re-snaps its height to
+    /// whole rhythm rows at every window width, so the mixed-font row below
+    /// stays in rhythm. Pad (default) keeps the whole image and leaves the
+    /// sub-unit remainder below it; crop rounds down instead and clips under
+    /// one unit evenly between the top and bottom edges. The frame's top edge
+    /// sits on the 3rd grid line below the paragraph's last baseline.
+    fn media_figure(&self) -> impl IntoElement {
+        let image_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/placeholder.png");
+        let image = img(image_path).size_full().object_fit(ObjectFit::Cover);
+        let frame = rhythm_frame(self.grid, 16. / 9.);
+        let frame = if self.crop_media { frame.crop() } else { frame };
+        div()
+            .mt(self.set.body.baseline_bottom(3))
+            .child(frame.child(image))
+    }
+
     /// Four runs in different fonts and sizes on one shared alphabetic
     /// baseline: pad each span down by the difference between the tallest
     /// `baseline_above` and its own, then place the row so that shared
@@ -413,11 +458,13 @@ impl Demo {
             .iter()
             .map(|(f, ..)| f32::from(f.baseline_above()))
             .fold(0., f32::max);
+        // The media frame above closes on a grid line, so the row opens with
+        // a plain rhythm height down to the shared baseline.
         div()
             .flex()
             .items_start()
             .gap(grid.height(3))
-            .mt(self.set.body.baseline_bottom(6) - px(max_above))
+            .mt(grid.height(6) - px(max_above))
             .children(spans.map(|(span_font, text, color)| {
                 div()
                     .rhythm_font(span_font)
@@ -506,6 +553,7 @@ impl Render for Demo {
                                         .mt(self.set.quote.baseline_between(&self.set.body, 6))
                                         .child(PARA_3),
                                 )
+                                .child(self.media_figure())
                                 .child(self.mixed_font_row()),
                         )
                         .rhythm_debug_overlay(grid, self.show_grid),
@@ -578,6 +626,7 @@ fn main() {
             error: None,
             show_grid: true,
             cap_anchor: false,
+            crop_media: false,
         };
 
         let bounds = Bounds::centered(None, size(px(840.), px(720.)), cx);

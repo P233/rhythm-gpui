@@ -47,6 +47,29 @@ impl RhythmGrid {
         px(self.core().height(n))
     }
 
+    /// Round `height` up to whole rhythm rows — the pad strategy for content
+    /// whose height is not rhythm-controlled; see [`Rhythm::snap_up`]. With a
+    /// known width this is all a media block needs:
+    /// `div().w(w).h(grid.snap_up(w / ratio))`; for fluid widths use
+    /// [`rhythm_frame`](crate::rhythm_frame).
+    ///
+    /// # Panics
+    ///
+    /// Panics when `height` is negative or non-finite.
+    pub fn snap_up(&self, height: Pixels) -> Pixels {
+        px(self.core().snap_up(height.into()))
+    }
+
+    /// Round `height` down to whole rhythm rows — the crop strategy; see
+    /// [`Rhythm::snap_down`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when `height` is negative or non-finite.
+    pub fn snap_down(&self, height: Pixels) -> Pixels {
+        px(self.core().snap_down(height.into()))
+    }
+
     /// Resolve a font bound to this grid — [`RhythmFont::resolve`] with the
     /// grid slot filled in; see it for the fallback-resolution caveats.
     pub fn font(

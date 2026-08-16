@@ -13,11 +13,12 @@ over typographic layout in gpui apps.
 Unlike the Sass original, **no hand-measured `baseline-ratio` is required**:
 metrics are read from the actual font file through gpui's text system.
 
-![The demo with the grid overlay on: a three-line drop cap and four fonts of different sizes and scripts sharing one baseline, every baseline landing on the grid](assets/demo.png)
+![The demo with the grid overlay on: a three-line drop cap, fluid-width media in pad mode, and four fonts of different sizes and scripts sharing one baseline, all composed on the grid](assets/demo.png)
 
 _`cargo run --example demo` — switch the typeface and every baseline keeps its
-appointment with the grid: the drop cap spans three lines, and four runs
-(serif, monospace, CJK) share a single alphabetic baseline computed from their
+appointment with the grid: the drop cap spans three lines, fluid-width media
+pads or crops to whole rows at every window width, and four runs (serif,
+monospace, CJK) share a single alphabetic baseline computed from their
 respective metrics._
 
 ## How it works
@@ -45,15 +46,12 @@ rhythm-gpui = "0.2"
 The crate has two layers behind one package:
 
 - **`gpui` feature** (default) — the gpui integration: metric resolution through
-  `TextSystem`, `Pixels`-typed spacing, drop caps, the `RhythmStyled` extension,
-  and the debug overlay.
+  `TextSystem`, `Pixels`-typed spacing, drop caps, the fluid-width `RhythmFrame`,
+  the `RhythmStyled` extension, and the debug overlay.
 - **`default-features = false`** — only the dependency-free rhythm math
-  (`Rhythm`, `FontRhythm`, `DropCapRhythm`, `snap`). Any renderer that centers
-  `ascent + descent` inside the line height can feed it metrics — gpui is not
-  compiled at all.
-
-macOS needs the Metal toolchain to build gpui:
-`xcodebuild -downloadComponent MetalToolchain`.
+  (`Rhythm`, `FontRhythm`, `DropCapRhythm`, `snap`, and height snapping). Any
+  renderer that centers `ascent + descent` inside the line height can feed it
+  metrics — gpui is not compiled at all.
 
 The MSRV is Rust 1.85 for the math-only build and is checked in CI; with the
 default `gpui` feature the effective minimum follows gpui itself, which does
@@ -65,6 +63,7 @@ not declare one.
 use gpui::{div, font, px, prelude::*};
 use rhythm_gpui::{RhythmGrid, RhythmStyled};
 
+// Given a GPUI context named `cx`:
 // 1. Pick a grid unit (the analog of rhythm-sass `$rhythm-size`).
 let grid = RhythmGrid::new(px(8.));
 
@@ -87,14 +86,16 @@ div()
 
 Everything else — the spacing functions, `RhythmFont` resolution and accessors,
 the `RhythmDropCap` / `DropCapRhythm` solvers, the `RhythmStyled` extension, the
-`rhythm_overlay` debug grid, and the gpui-free math layer — is documented on
+`rhythm_frame` / `RhythmFrame` media container, the `rhythm_overlay` debug grid,
+and the gpui-free math layer — is documented on
 **[docs.rs](https://docs.rs/rhythm-gpui)**.
 
 ## Demo & recipes
 
 ```
 cargo run --example demo   # font picker, drop cap, heading anchor toggle,
-                           # mixed-font baseline row, grid overlay;
+                           # fluid media pad/crop, mixed-font baseline row,
+                           # grid overlay;
                            # downloads Google Fonts on demand
 ```
 
@@ -114,6 +115,19 @@ The demo doubles as a recipe collection:
   height > ascent − descent, e.g. Merriweather) the anchor is a _downward_
   shift, and a margin would stretch the flex row and push everything below off
   the grid. Wrap-around text splitting: `drop_cap_paragraph` in the demo.
+- **Media on the grid** — a fluid-width image's height is not generally an exact
+  number of rhythm rows, so everything after it would drift off the grid.
+  `rhythm_frame(grid, ratio)`, where `ratio` is width divided by height, fits it
+  back on: the frame fills the parent's width and snaps its height
+  (`width / ratio`) up to whole rhythm rows, leaving the sub-unit remainder
+  below the content; `.crop()` snaps down instead, clipping under one unit
+  evenly between the top and bottom edges without resizing the content to the
+  snapped height. Style the child to fill the frame's natural-ratio content box
+  — use `.size_full().object_fit(ObjectFit::Cover)` when the image itself has a
+  different ratio.
+  Toggle pad/crop in the demo and resize the window: the mixed-font row
+  below stays in rhythm at every width. With a known column width, skip the
+  frame: `div().w(w).h(grid.snap_up(w / ratio))`.
 - **Mixed fonts on one baseline** — different sizes, families, and scripts
   aligned on one grid-seated alphabetic baseline. CJK fonts publish the same
   metrics, but ideographs are drawn on the em square, so their ink dips
@@ -147,6 +161,9 @@ git config core.hooksPath .githooks   # once per clone
 The `pre-commit` hook runs `rustfmt` over the staged `.rs` files and re-stages
 them, so what you commit already satisfies CI's `cargo fmt --check`. Markdown,
 YAML and JSON are formatted too when Prettier is on `PATH`.
+
+`cargo test --features test-support` additionally runs the headless GPUI layout
+regression tests; application code does not need this feature.
 
 ## Credits
 
