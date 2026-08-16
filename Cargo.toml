@@ -11,9 +11,18 @@ readme = "README.md"
 keywords = ["gpui", "typography", "vertical-rhythm", "baseline", "layout"]
 categories = ["gui", "graphics"]
 authors = ["Peiwen Lu <hi@peiwen.lu>"]
-# The README screenshot stays out of the published package; crates.io rewrites
-# the relative link to the repository's raw URL at the published commit.
-exclude = ["assets/demo.png", ".github/", ".githooks/", ".gitignore", "rustfmt.toml"]
+# The README screenshot and the bundled shaping-test fonts stay out of the
+# published package (the shaping suite skips itself when the fonts are
+# absent); crates.io rewrites the relative screenshot link to the
+# repository's raw URL at the published commit.
+exclude = [
+    "assets/demo.png",
+    "tests/fonts/",
+    ".github/",
+    ".githooks/",
+    ".gitignore",
+    "rustfmt.toml",
+]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -32,8 +41,26 @@ test-support = ["gpui", "gpui/test-support"]
 gpui = { version = "0.2", optional = true }
 
 [dev-dependencies]
+criterion = "0.5"
 ureq = "2"
 
 [[example]]
 name = "demo"
+required-features = ["gpui"]
+
+[[example]]
+name = "direct_paint"
+required-features = ["gpui"]
+
+# Real CoreText shaping needs the AppKit main thread, which the libtest
+# harness does not provide; the suite runs as its own binary and self-skips
+# off macOS or without the bundled fonts.
+[[test]]
+name = "shaping"
+harness = false
+required-features = ["gpui"]
+
+[[bench]]
+name = "resolve"
+harness = false
 required-features = ["gpui"]

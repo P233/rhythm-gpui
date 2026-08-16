@@ -46,12 +46,14 @@ rhythm-gpui = "0.2"
 The crate has two layers behind one package:
 
 - **`gpui` feature** (default) — the gpui integration: metric resolution through
-  `TextSystem`, `Pixels`-typed spacing, drop caps, the fluid-width `RhythmFrame`,
-  the `RhythmStyled` extension, and the debug overlay.
+  `TextSystem` (with `RhythmFontSpec` cache keys and the resolved `FontId`),
+  `Pixels`-typed spacing, drop caps, the fluid-width `RhythmFrame`, the
+  `RhythmStyled` extension, and the debug overlay.
 - **`default-features = false`** — only the dependency-free rhythm math
-  (`Rhythm`, `FontRhythm`, `DropCapRhythm`, `snap`, and height snapping). Any
-  renderer that centers `ascent + descent` inside the line height can feed it
-  metrics — gpui is not compiled at all.
+  (`Rhythm`, `FontRhythm`, `RhythmLineMetrics`, `RhythmBlockMetrics`,
+  `DropCapRhythm`, `snap`, and height snapping). Any renderer that centers
+  `ascent + descent` inside the line height can feed it metrics — gpui is not
+  compiled at all.
 
 The MSRV is Rust 1.85 for the math-only build and is checked in CI; with the
 default `gpui` feature the effective minimum follows gpui itself, which does
@@ -144,6 +146,34 @@ The demo doubles as a recipe collection:
   height; each remaining fractional layout edge can differ from the exact math
   by up to half a device pixel.
 
+## Custom renderers (direct paint)
+
+```
+cargo run --example direct_paint   # shape once, cache WrappedLines,
+                                   # paint straight onto the grid
+```
+
+Document renderers that shape text themselves skip the element layer: build
+`RhythmLineMetrics` from each shaped line's real `ascent()` / `descent()` —
+the maxima over its explicit font runs, which is how lines mixing bold,
+inline code, CJK, or emoji faces actually shape — lay blocks out with
+`RhythmBlockMetrics` (baseline- or cap-anchored, with first/middle/last
+fragment heights that keep the rhythm phase across virtualized splits), and
+place every baseline with `paint_origin_for(target)`. Glyph fallback needs no
+special handling: substituted glyphs never grow the line box.
+
+The lifecycle contract: a `RhythmFont` is an immutable resolved value. Within
+the crate, only its resolution factories query the `TextSystem`; document
+renderers still use `shape_text` when their shaped-line cache is stale. Once
+metrics are available, the `Rhythm` / `FontRhythm` / line/block geometry paths
+are allocation-free `Copy` math (a counting-allocator test enforces that exact
+scope). Key caller-owned resolution caches with `RhythmFontSpec`; the crate
+keeps no cache of its own. Register a family before its first resolution — gpui
+caches failed font requests, so clearing a caller cache after late registration
+cannot repair the miss in the same `TextSystem`. Mixed-run and glyph-fallback
+shaping semantics are CI-verified against macOS/CoreText (`tests/shaping.rs`);
+other gpui text backends are not yet verified.
+
 **Tip:** as with rhythm-sass, make every text block occupy a whole number of
 rhythm units. Line heights are whole units by construction; close a
 baseline-anchored block with `baseline_bottom`, or a cap-anchored block with
@@ -161,6 +191,11 @@ git config core.hooksPath .githooks   # once per clone
 The `pre-commit` hook runs `rustfmt` over the staged `.rs` files and re-stages
 them, so what you commit already satisfies CI's `cargo fmt --check`. Markdown,
 YAML and JSON are formatted too when Prettier is on `PATH`.
+
+On macOS, `cargo test` also runs the real-shaping suite (`tests/shaping.rs`),
+which briefly opens a window — AppKit shaping needs one — and reads the OFL
+Noto fonts bundled under `tests/fonts/`. `cargo bench --bench resolve` tracks
+warm font-resolution cost as a local dev tool; there is no ns-level CI gate.
 
 `cargo test --features test-support` additionally runs the headless GPUI layout
 regression tests; application code does not need this feature.

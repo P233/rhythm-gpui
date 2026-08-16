@@ -2,11 +2,24 @@
 //! spacing, drop caps, the `RhythmStyled` extension, and the debug overlay.
 
 use gpui::{
-    canvas, fill, point, px, rgba, size, Bounds, Font, Hsla, IntoElement, ParentElement, Pixels,
-    Styled, TextSystem,
+    canvas, fill, point, px, rgba, size, Bounds, Font, FontId, Hsla, IntoElement, ParentElement,
+    Pixels, Styled, TextSystem,
 };
 
-use crate::{FontRhythm, Rhythm};
+use crate::{FontRhythm, Rhythm, RhythmLineMetrics};
+
+fn assert_valid_font_request(font: &Font, font_size: Pixels, line_rhythms: u32) {
+    assert!(
+        font.weight.0.is_finite() && font.weight.0 > 0.0,
+        "font weight must be finite and greater than zero"
+    );
+    let font_size: f32 = font_size.into();
+    assert!(
+        font_size.is_finite() && font_size > 0.0,
+        "font_size must be finite and greater than zero"
+    );
+    assert!(line_rhythms > 0, "line_rhythms must be greater than zero");
+}
 
 /// The vertical rhythm grid in gpui units.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -27,6 +40,7 @@ impl RhythmGrid {
     }
 
     /// Height of one rhythm unit.
+    #[inline]
     pub fn size(&self) -> Pixels {
         px(self.core.size())
     }
@@ -43,6 +57,7 @@ impl RhythmGrid {
     }
 
     /// Total height of `n` rhythm units (rhythm-sass `rhythm($n)`).
+    #[inline]
     pub fn height(&self, n: i32) -> Pixels {
         px(self.core().height(n))
     }
@@ -56,6 +71,7 @@ impl RhythmGrid {
     /// # Panics
     ///
     /// Panics when `height` is negative or non-finite.
+    #[inline]
     pub fn snap_up(&self, height: Pixels) -> Pixels {
         px(self.core().snap_up(height.into()))
     }
@@ -66,8 +82,23 @@ impl RhythmGrid {
     /// # Panics
     ///
     /// Panics when `height` is negative or non-finite.
+    #[inline]
     pub fn snap_down(&self, height: Pixels) -> Pixels {
         px(self.core().snap_down(height.into()))
+    }
+
+    /// Metrics for one shaped line on this grid — the `Pixels`-typed entry to
+    /// [`RhythmLineMetrics`]. Feed a `WrappedLine`'s `ascent()` / `descent()`
+    /// (the shaped maxima over the line's explicit font runs) and the line
+    /// height in whole rhythm units; see [`RhythmLineMetrics`] for the
+    /// placement contract.
+    pub fn line_metrics(
+        &self,
+        ascent: Pixels,
+        descent: Pixels,
+        line_rhythms: u32,
+    ) -> RhythmLineMetrics {
+        RhythmLineMetrics::new(ascent.into(), descent.into(), line_rhythms, self.core())
     }
 
     /// Resolve a font bound to this grid — [`RhythmFont::resolve`] with the
@@ -88,6 +119,7 @@ impl RhythmGrid {
     ///
     /// Panics when `font` was resolved against a different grid size.
     #[deprecated(since = "0.2.0", note = "use `RhythmFont::baseline_top`")]
+    #[inline]
     pub fn baseline_top(&self, font: &RhythmFont, n: i32) -> Pixels {
         self.assert_font(font);
         font.baseline_top(n)
@@ -99,6 +131,7 @@ impl RhythmGrid {
     ///
     /// Panics when `font` was resolved against a different grid size.
     #[deprecated(since = "0.2.0", note = "use `RhythmFont::baseline_bottom`")]
+    #[inline]
     pub fn baseline_bottom(&self, font: &RhythmFont, n: i32) -> Pixels {
         self.assert_font(font);
         font.baseline_bottom(n)
@@ -110,6 +143,7 @@ impl RhythmGrid {
     ///
     /// Panics when `above` or `below` was resolved against a different grid size.
     #[deprecated(since = "0.2.0", note = "use `RhythmFont::baseline_between`")]
+    #[inline]
     pub fn baseline_between(&self, above: &RhythmFont, below: &RhythmFont, n: i32) -> Pixels {
         self.assert_font(above);
         above.baseline_between(below, n)
@@ -121,6 +155,7 @@ impl RhythmGrid {
     ///
     /// Panics when `font` was resolved against a different grid size.
     #[deprecated(since = "0.2.0", note = "use `RhythmFont::cap_top`")]
+    #[inline]
     pub fn cap_top(&self, font: &RhythmFont, n: i32) -> Option<Pixels> {
         self.assert_font(font);
         font.cap_top(n)
@@ -132,6 +167,7 @@ impl RhythmGrid {
     ///
     /// Panics when `font` was resolved against a different grid size.
     #[deprecated(since = "0.2.0", note = "use `RhythmFont::cap_bottom`")]
+    #[inline]
     pub fn cap_bottom(&self, font: &RhythmFont, m: i32) -> Option<Pixels> {
         self.assert_font(font);
         font.cap_bottom(m)
@@ -141,9 +177,27 @@ impl RhythmGrid {
 /// A requested gpui font bound to the rhythm grid, with vertical metrics from
 /// the font gpui actually resolved. When the requested family is unavailable,
 /// that may be a fallback font; see [`Self::resolve`].
+///
+/// # Lifecycle
+///
+/// A `RhythmFont` is an immutable resolved value, and only [`Self::resolve`]
+/// (with the factories built on it) touches gpui's `TextSystem`: metric and
+/// spacing methods afterwards are pure geometry on the stored values,
+/// allocation-free and lock-free, while style application reuses the stored
+/// [`Font`] without querying the text system. Register each font family
+/// (`TextSystem::add_fonts`) *before its first resolution*: gpui caches failed
+/// lookups by [`Font`], so adding a family later and clearing a caller-owned
+/// cache does not repair that miss in the same `TextSystem`. Resolution
+/// silently falls back otherwise. Re-resolve affected values when typography
+/// settings produce a new request key; nothing revalidates an existing value
+/// against the text system. The crate keeps no font cache of its own: gpui
+/// already caches `Font → FontId` and metrics, so a caller wanting to reuse
+/// resolved values owns that map, keyed by [`RhythmFontSpec`], along with its
+/// invalidation.
 #[derive(Debug, Clone)]
 pub struct RhythmFont {
     font: Font,
+    font_id: Option<FontId>,
     metrics: FontRhythm,
     grid: RhythmGrid,
 }
@@ -159,12 +213,21 @@ impl RhythmFont {
     /// [`TextSystem::all_font_names`] before calling this method when using the
     /// exact family is a requirement.
     ///
-    /// Metrics come from the resolved primary font only. A shaped line has one
-    /// baseline, placed from the tallest run's ascent, so explicitly mixing a
-    /// taller font (e.g. CJK) into the same element shifts every run's baseline
-    /// together — lay each font out as its own element to keep them on the
-    /// grid. Glyph-level fallback is different: substituted glyphs borrow the
-    /// primary font's baseline and never enter the line's ascent.
+    /// Metrics come from the resolved primary font only — what an element
+    /// that sets one text style paints with. A line that explicitly mixes
+    /// fonts (bold/italic runs, inline code, an explicit CJK or emoji face)
+    /// has one baseline placed from the maximum ascent and descent over its
+    /// runs; shape it and place the result through
+    /// [`RhythmLineMetrics`](crate::RhythmLineMetrics) so that shared
+    /// baseline still lands on the grid. Glyph-level fallback is different:
+    /// substituted glyphs borrow the primary font's baseline and never enter
+    /// the line's ascent, so fallback text needs no special handling.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the font weight is zero, negative, or non-finite, when
+    /// `font_size` is zero, negative, or non-finite, or when `line_rhythms` is
+    /// zero. Validation happens before the text system is queried.
     pub fn resolve(
         text_system: &TextSystem,
         font: Font,
@@ -172,6 +235,7 @@ impl RhythmFont {
         line_rhythms: u32,
         grid: RhythmGrid,
     ) -> Self {
+        assert_valid_font_request(&font, font_size, line_rhythms);
         let font_id = text_system.resolve_font(&font);
         // gpui's FontMetrics keeps the OpenType sign convention where descent is
         // negative below the baseline (its paint path negates it before use);
@@ -187,6 +251,7 @@ impl RhythmFont {
 
         Self {
             font,
+            font_id: Some(font_id),
             metrics,
             grid,
         }
@@ -203,6 +268,7 @@ impl RhythmFont {
     ) -> Self {
         Self {
             font,
+            font_id: None,
             metrics: FontRhythm::from_baseline_ratio(
                 font_size.into(),
                 line_rhythms,
@@ -218,7 +284,49 @@ impl RhythmFont {
         &self.font
     }
 
+    /// The font identity gpui resolved the metrics from — the fallback
+    /// font's when the requested family was unavailable. `None` when the
+    /// value was built without a text system
+    /// ([`Self::from_baseline_ratio`]).
+    ///
+    /// A [`FontId`] is an index into the resolving `TextSystem`: compare it
+    /// with shaped-run font ids from the same system, but do not persist it
+    /// or carry it across windows or font registrations — use
+    /// [`Self::spec`] for durable request keys. "Did fallback happen" has no
+    /// precise reverse lookup: `TextSystem::get_font_for_id` returns one
+    /// cached font request for an id, not an authoritative platform-face
+    /// identity, and can be ambiguous when several requests resolve to the
+    /// same face. Check `TextSystem::all_font_names` before resolving when
+    /// using the exact family is a requirement.
+    #[inline]
+    pub const fn resolved_font_id(&self) -> Option<FontId> {
+        self.font_id
+    }
+
+    /// The TextSystem resolution request that produced this font, as a
+    /// hashable cache key. Returns `None` for values synthesized by
+    /// [`Self::from_baseline_ratio`], because their ratio-derived metrics
+    /// cannot be reproduced by [`RhythmFontSpec::resolve`].
+    pub fn spec(&self) -> Option<RhythmFontSpec> {
+        self.font_id?;
+        Some(RhythmFontSpec {
+            font: self.font.clone(),
+            font_size: self.font_size(),
+            line_rhythms: self.metrics.line_rhythms(),
+            grid_size: self.grid.size(),
+        })
+    }
+
+    /// This font's line placement as a [`RhythmLineMetrics`] — the same
+    /// value a shaped line produces, so a direct-paint renderer places
+    /// single-style text, empty lines, and mixed-run shaped lines through
+    /// one code path.
+    pub fn line_metrics(&self) -> RhythmLineMetrics {
+        self.metrics.line_metrics(self.grid.core())
+    }
+
     /// The grid this font was resolved against.
+    #[inline]
     pub const fn grid(&self) -> RhythmGrid {
         self.grid
     }
@@ -229,6 +337,7 @@ impl RhythmFont {
     /// Negative when `n × grid size` is smaller than
     /// [`baseline_above`](Self::baseline_above) — meaningful as a margin, not
     /// as a padding.
+    #[inline]
     pub fn baseline_top(&self, n: i32) -> Pixels {
         px(self.grid.core().baseline_top(&self.metrics, n))
     }
@@ -239,6 +348,7 @@ impl RhythmFont {
     ///
     /// Negative when `n × grid size` is smaller than the baseline-to-bottom
     /// distance — meaningful as a margin, not as a padding.
+    #[inline]
     pub fn baseline_bottom(&self, n: i32) -> Pixels {
         px(self.grid.core().baseline_bottom(&self.metrics, n))
     }
@@ -255,6 +365,7 @@ impl RhythmFont {
     ///
     /// Panics when `below` was resolved against a different grid size; its
     /// line height would no longer match the calculated spacing.
+    #[inline]
     pub fn baseline_between(&self, below: &RhythmFont, n: i32) -> Pixels {
         assert_eq!(
             self.grid, below.grid,
@@ -271,6 +382,7 @@ impl RhythmFont {
     /// with [`Self::cap_bottom`], not [`Self::baseline_bottom`]; see
     /// [`Rhythm::cap_top`] for the contract, or use [`Self::cap_span`] to get
     /// the pair in one call. `None` when the font has no usable cap height.
+    #[inline]
     pub fn cap_top(&self, n: i32) -> Option<Pixels> {
         self.grid.core().cap_top(&self.metrics, n).map(px)
     }
@@ -278,6 +390,7 @@ impl RhythmFont {
     /// Bottom spacing pairing [`Self::cap_top`], returning the trimmed space
     /// so the block closes on whole rhythm rows; see [`Rhythm::cap_bottom`].
     /// `None` when the font has no usable cap height.
+    #[inline]
     pub fn cap_bottom(&self, m: i32) -> Option<Pixels> {
         self.grid.core().cap_bottom(&self.metrics, m).map(px)
     }
@@ -301,6 +414,7 @@ impl RhythmFont {
     /// })
     /// # }
     /// ```
+    #[inline]
     pub fn cap_span(&self, top: i32, bottom: i32) -> Option<(Pixels, Pixels)> {
         Some((self.cap_top(top)?, self.cap_bottom(bottom)?))
     }
@@ -320,22 +434,26 @@ impl RhythmFont {
     ///
     /// These belong to the fallback font when gpui could not load the requested
     /// family; see [`Self::resolve`].
+    #[inline]
     pub const fn metrics(&self) -> &FontRhythm {
         &self.metrics
     }
 
     /// The font size the metrics were resolved at.
+    #[inline]
     pub fn font_size(&self) -> Pixels {
         px(self.metrics.font_size())
     }
 
     /// The rhythm line height: `line_rhythms × grid size`.
+    #[inline]
     pub fn line_height(&self) -> Pixels {
         px(self.metrics.line_height(self.grid.core()))
     }
 
     /// Distance from the top of the line box down to the baseline, as gpui will
     /// paint it. Useful for custom elements and debug overlays.
+    #[inline]
     pub fn baseline_above(&self) -> Pixels {
         px(self.metrics.baseline_above(self.grid.core()))
     }
@@ -344,14 +462,104 @@ impl RhythmFont {
     /// as a negative margin) for CSS `text-box-trim`-style optical alignment.
     /// `None` when the metrics source has no usable cap height, including values
     /// created with [`Self::from_baseline_ratio`].
+    #[inline]
     pub fn cap_trim_top(&self) -> Option<Pixels> {
         self.metrics.cap_trim_top(self.grid.core()).map(px)
     }
 
     /// Like [`Self::cap_trim_top`] but trimming to the x-height. `None` when the
     /// metrics source has no usable x-height.
+    #[inline]
     pub fn x_trim_top(&self) -> Option<Pixels> {
         self.metrics.x_trim_top(self.grid.core()).map(px)
+    }
+}
+
+/// The pre-resolve identity of a [`RhythmFont`]: the requested [`Font`],
+/// size, line rhythms, and grid size as one hashable value — the cache key
+/// for caller-owned typography catalogs.
+///
+/// The crate deliberately keeps no font cache (gpui already caches
+/// `Font → FontId` and metrics); an app reusing resolved values across a
+/// document owns the map and its invalidation. Register font families before
+/// resolving any spec for them: gpui caches failed lookups, so clearing this
+/// caller-owned map after late registration cannot repair an earlier miss.
+/// Rebuild the map when typography settings change:
+///
+/// ```no_run
+/// use std::collections::HashMap;
+///
+/// use gpui::{font, px, TextSystem};
+/// use rhythm_gpui::{RhythmFont, RhythmFontSpec, RhythmGrid};
+///
+/// fn body(cache: &mut HashMap<RhythmFontSpec, RhythmFont>, ts: &TextSystem) -> RhythmFont {
+///     let spec = RhythmFontSpec::new(font("Noto Serif"), px(16.), 3, RhythmGrid::new(px(8.)));
+///     cache
+///         .entry(spec.clone())
+///         .or_insert_with(|| spec.resolve(ts))
+///         .clone()
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RhythmFontSpec {
+    font: Font,
+    font_size: Pixels,
+    line_rhythms: u32,
+    grid_size: Pixels,
+}
+
+impl RhythmFontSpec {
+    /// The spec for resolving `font` at `font_size` on `grid` with a
+    /// `line_rhythms`-unit line height.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the font weight is zero, negative, or non-finite, when
+    /// `font_size` is zero, negative, or non-finite, or when `line_rhythms` is
+    /// zero.
+    pub fn new(font: Font, font_size: Pixels, line_rhythms: u32, grid: RhythmGrid) -> Self {
+        assert_valid_font_request(&font, font_size, line_rhythms);
+        Self {
+            font,
+            font_size,
+            line_rhythms,
+            grid_size: grid.size(),
+        }
+    }
+
+    /// The requested gpui font configuration.
+    pub fn font(&self) -> &Font {
+        &self.font
+    }
+
+    /// The font size the metrics will be resolved at.
+    #[inline]
+    pub const fn font_size(&self) -> Pixels {
+        self.font_size
+    }
+
+    /// Line height in whole rhythm units.
+    #[inline]
+    pub const fn line_rhythms(&self) -> u32 {
+        self.line_rhythms
+    }
+
+    /// The grid the font will be bound to.
+    #[inline]
+    pub fn grid(&self) -> RhythmGrid {
+        RhythmGrid::new(self.grid_size)
+    }
+
+    /// Resolve the spec into a [`RhythmFont`] — [`RhythmFont::resolve`] with
+    /// this identity; see it for the fallback-resolution caveats.
+    pub fn resolve(&self, text_system: &TextSystem) -> RhythmFont {
+        RhythmFont::resolve(
+            text_system,
+            self.font.clone(),
+            self.font_size,
+            self.line_rhythms,
+            self.grid(),
+        )
     }
 }
 
@@ -408,6 +616,9 @@ impl RhythmDropCap {
         Self {
             font: RhythmFont {
                 font,
+                // resolve_font identifies the face, not the size, so the
+                // probe's identity holds at the solved size.
+                font_id: probe.font_id,
                 metrics: *solved.metrics(),
                 grid: body.grid,
             },
@@ -425,6 +636,7 @@ impl RhythmDropCap {
     /// (cap height exceeding `ascent − descent`, e.g. Merriweather) need a
     /// downward shift, and a positive margin would grow the flex row's cross
     /// size and push everything below off the grid.
+    #[inline]
     pub const fn top(&self) -> Pixels {
         self.top
     }
@@ -518,14 +730,28 @@ impl<T: Styled> RhythmStyled for T {}
 /// the rhythm-sass `draw-rhythms()` mixin.
 ///
 /// If the content scrolls, put the overlay *inside* the scrolled wrapper so
-/// the grid moves with the text.
+/// the grid moves with the text. Only rows intersecting the visible region
+/// (the current content mask) are painted, so covering a document far taller
+/// than the viewport costs `O(viewport height / grid size)` per frame; the
+/// stripe phase stays anchored to the container's top edge.
 pub fn rhythm_overlay(grid: RhythmGrid, color: impl Into<Hsla>) -> impl IntoElement {
     let color = color.into();
     canvas(
         |_, _, _| (),
         move |bounds, _, window, _| {
-            let mut y = bounds.origin.y;
-            while y < bounds.bottom() {
+            let visible = bounds.intersect(&window.content_mask().bounds);
+            if visible.size.height <= px(0.) || visible.size.width <= px(0.) {
+                return;
+            }
+            let step = grid.size() * 2.;
+            let first = first_visible_stripe(
+                bounds.origin.y.into(),
+                visible.origin.y.into(),
+                grid.size().into(),
+                step.into(),
+            );
+            let mut y = bounds.origin.y + step * first;
+            while y < visible.bottom() {
                 window.paint_quad(fill(
                     Bounds::new(
                         point(bounds.origin.x, y),
@@ -533,7 +759,7 @@ pub fn rhythm_overlay(grid: RhythmGrid, color: impl Into<Hsla>) -> impl IntoElem
                     ),
                     color,
                 ));
-                y += grid.size() * 2.;
+                y += step;
             }
         },
     )
@@ -541,11 +767,19 @@ pub fn rhythm_overlay(grid: RhythmGrid, color: impl Into<Hsla>) -> impl IntoElem
     .inset_0()
 }
 
+/// Index of the first stripe that can intersect a viewport starting at
+/// `visible_top`, for stripes `stripe_height` tall spaced `step` apart from
+/// `origin_y` — the phase-preserving skip count for the overlay.
+fn first_visible_stripe(origin_y: f32, visible_top: f32, stripe_height: f32, step: f32) -> f32 {
+    (((visible_top - origin_y - stripe_height) / step).ceil()).max(0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use gpui::{
-        font, AnyElement, FontFallbacks, FontFeatures, FontStyle, Position, StyleRefinement,
+        font, AnyElement, FontFallbacks, FontFeatures, FontId, FontStyle, FontWeight, Position,
+        StyleRefinement,
     };
 
     #[derive(Default)]
@@ -621,6 +855,7 @@ mod tests {
         let cap = RhythmDropCap {
             font: RhythmFont {
                 font: font("Example Serif"),
+                font_id: None,
                 metrics: *solved.metrics(),
                 grid,
             },
@@ -713,6 +948,7 @@ mod tests {
         let metrics = FontRhythm::from_platform_metrics(16.0, 3, 14.67, -3.51, 11.09, 7.70);
         let heading = RhythmFont {
             font: font("Example Serif"),
+            font_id: None,
             metrics,
             grid,
         };
@@ -738,5 +974,96 @@ mod tests {
     #[should_panic(expected = "rhythm unit size must be finite and greater than zero")]
     fn grid_rejects_a_non_positive_size() {
         let _ = RhythmGrid::new(px(0.0));
+    }
+
+    #[test]
+    fn overlay_skips_to_the_first_visible_stripe_without_losing_phase() {
+        // Nothing scrolled away: start at the container's top edge.
+        assert_eq!(first_visible_stripe(0.0, 0.0, 8.0, 16.0), 0.0);
+        // A stripe still partially visible at the top edge is kept…
+        assert_eq!(first_visible_stripe(0.0, 1607.0, 8.0, 16.0), 100.0);
+        // …and dropped once it has fully scrolled past.
+        assert_eq!(first_visible_stripe(0.0, 1609.0, 8.0, 16.0), 101.0);
+        // The mask can never start above the canvas bounds, but the clamp
+        // keeps the phase anchored even for a degenerate input.
+        assert_eq!(first_visible_stripe(100.0, 0.0, 8.0, 16.0), 0.0);
+        // The phase follows the container's own origin.
+        assert_eq!(first_visible_stripe(4.0, 1611.0, 8.0, 16.0), 100.0);
+    }
+
+    #[test]
+    fn spec_keys_a_map_for_text_system_resolved_fonts() {
+        use std::collections::HashMap;
+
+        let grid = RhythmGrid::new(px(8.0));
+        let metrics = FontRhythm::from_baseline_ratio(16.0, 3, 0.2);
+        let body = RhythmFont {
+            font: font("Example Serif"),
+            font_id: Some(FontId(7)),
+            metrics,
+            grid,
+        };
+        let spec = body.spec().expect("font came from a text system");
+        assert_eq!(
+            spec,
+            RhythmFontSpec::new(font("Example Serif"), px(16.0), 3, grid)
+        );
+        assert_eq!(spec.font(), body.font());
+        assert_eq!(spec.font_size(), body.font_size());
+        assert_eq!(spec.line_rhythms(), 3);
+        assert_eq!(spec.grid(), grid);
+
+        let mut cache = HashMap::new();
+        cache.insert(spec.clone(), body);
+        assert!(cache.contains_key(&spec));
+        // A different size is a different identity.
+        let other = RhythmFontSpec::new(font("Example Serif"), px(17.0), 3, grid);
+        assert!(!cache.contains_key(&other));
+    }
+
+    #[test]
+    fn spec_rejects_invalid_request_values_before_it_can_be_a_cache_key() {
+        let grid = RhythmGrid::new(px(8.0));
+        for invalid in [0.0, -0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let result = std::panic::catch_unwind(|| {
+                RhythmFontSpec::new(font("Example Serif"), px(invalid), 3, grid)
+            });
+            assert!(result.is_err(), "accepted invalid font size {invalid:?}");
+        }
+        let zero_lines = std::panic::catch_unwind(|| {
+            RhythmFontSpec::new(font("Example Serif"), px(16.0), 0, grid)
+        });
+        assert!(zero_lines.is_err(), "accepted a zero line-rhythm count");
+
+        for invalid in [0.0, -0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let mut invalid_font = font("Example Serif");
+            invalid_font.weight = FontWeight(invalid);
+            let result =
+                std::panic::catch_unwind(|| RhythmFontSpec::new(invalid_font, px(16.0), 3, grid));
+            assert!(result.is_err(), "accepted invalid font weight {invalid:?}");
+        }
+    }
+
+    #[test]
+    fn baseline_ratio_fonts_carry_no_resolved_identity() {
+        let grid = RhythmGrid::new(px(8.0));
+        let first = RhythmFont::from_baseline_ratio(font("Example Serif"), px(16.0), 3, 0.2, grid);
+        let second = RhythmFont::from_baseline_ratio(font("Example Serif"), px(16.0), 3, 0.3, grid);
+        assert_eq!(first.resolved_font_id(), None);
+        assert_eq!(first.spec(), None);
+        assert_eq!(second.spec(), None);
+        assert_ne!(first.metrics(), second.metrics());
+    }
+
+    #[test]
+    fn line_metric_factories_agree_with_the_math_layer() {
+        let grid = RhythmGrid::new(px(8.0));
+        let body = RhythmFont::from_baseline_ratio(font("Example Serif"), px(16.0), 3, 0.2, grid);
+        let from_font = body.line_metrics();
+        let from_grid =
+            grid.line_metrics(px(body.metrics().ascent()), px(body.metrics().descent()), 3);
+        assert_eq!(from_font, from_grid);
+        assert_eq!(f32::from(body.baseline_above()), from_font.baseline_above());
+        assert_eq!(f32::from(body.line_height()), from_font.line_height());
     }
 }

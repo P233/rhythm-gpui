@@ -41,12 +41,14 @@ impl Rhythm {
     }
 
     /// Height of one rhythm unit in logical pixels.
+    #[inline]
     pub const fn size(&self) -> f32 {
         self.size
     }
 
     /// Total height of `n` rhythm units. Equivalent to rhythm-sass `rhythm($n)`;
     /// apply offsets with plain addition: `grid.height(5) - 1.0`.
+    #[inline]
     pub fn height(&self, n: i32) -> f32 {
         self.size * n as f32
     }
@@ -60,6 +62,7 @@ impl Rhythm {
     /// The result is negative when `n × size` is smaller than the font's
     /// [`baseline_above`](FontRhythm::baseline_above); a negative value is
     /// meaningful as a margin but not as a padding, so pick `n` accordingly.
+    #[inline]
     pub fn baseline_top(&self, font: &FontRhythm, n: i32) -> f32 {
         self.height(n) - font.baseline_above(*self)
     }
@@ -70,6 +73,7 @@ impl Rhythm {
     /// The result is negative when `n × size` is smaller than the font's
     /// [`baseline_below`](FontRhythm::baseline_below); a negative value is
     /// meaningful as a margin but not as a padding, so pick `n` accordingly.
+    #[inline]
     pub fn baseline_bottom(&self, font: &FontRhythm, n: i32) -> f32 {
         self.height(n) - font.baseline_below(*self)
     }
@@ -81,6 +85,7 @@ impl Rhythm {
     ///
     /// The result is negative when `n` rhythm units cannot fit both fonts'
     /// baseline distances; negative values overlap the blocks when applied.
+    #[inline]
     pub fn baseline_between(&self, above: &FontRhythm, below: &FontRhythm, n: i32) -> f32 {
         self.baseline_bottom(above, n) - below.baseline_above(*self)
     }
@@ -115,6 +120,7 @@ impl Rhythm {
     /// let block = pt + heading.line_height(grid) + pb;
     /// assert!((block - 64.0).abs() < 1e-3); // 8 whole rows: what follows stays in rhythm
     /// ```
+    #[inline]
     pub fn cap_top(&self, font: &FontRhythm, n: i32) -> Option<f32> {
         Some(self.height(n) - font.cap_trim_top(*self)?)
     }
@@ -127,6 +133,7 @@ impl Rhythm {
     /// top.
     ///
     /// `None` when `font` has no usable cap height.
+    #[inline]
     pub fn cap_bottom(&self, font: &FontRhythm, m: i32) -> Option<f32> {
         Some(self.height(m) + font.cap_trim_top(*self)?)
     }
@@ -145,6 +152,7 @@ impl Rhythm {
     /// # Panics
     ///
     /// Panics when `height` is negative or non-finite.
+    #[inline]
     pub fn snap_up(&self, height: f32) -> f32 {
         self.size * self.snap_rows(height, f32::ceil)
     }
@@ -157,6 +165,7 @@ impl Rhythm {
     /// # Panics
     ///
     /// Panics when `height` is negative or non-finite.
+    #[inline]
     pub fn snap_down(&self, height: f32) -> f32 {
         self.size * self.snap_rows(height, f32::floor)
     }
@@ -278,31 +287,37 @@ impl FontRhythm {
     }
 
     /// Font size in logical pixels.
+    #[inline]
     pub const fn font_size(&self) -> f32 {
         self.font_size
     }
 
     /// Line height in whole rhythm units.
+    #[inline]
     pub const fn line_rhythms(&self) -> u32 {
         self.line_rhythms
     }
 
     /// Distance from the baseline up to the top of the `ascent` box, positive.
+    #[inline]
     pub const fn ascent(&self) -> f32 {
         self.ascent
     }
 
     /// Distance from the baseline down to the bottom of the `descent` box, positive.
+    #[inline]
     pub const fn descent(&self) -> f32 {
         self.descent
     }
 
     /// Height of capital letters above the baseline, if known.
+    #[inline]
     pub const fn cap_height(&self) -> Option<f32> {
         self.cap_height
     }
 
     /// Height of a lowercase x above the baseline, if known.
+    #[inline]
     pub const fn x_height(&self) -> Option<f32> {
         self.x_height
     }
@@ -322,26 +337,31 @@ impl FontRhythm {
     }
 
     /// The Plumber-style baseline ratio implied by these metrics.
+    #[inline]
     pub fn baseline_ratio(&self) -> f32 {
         (self.font_size + self.descent - self.ascent) / (2.0 * self.font_size)
     }
 
     /// The line height on `grid`: [`line_rhythms`](Self::line_rhythms) whole rhythm units.
+    #[inline]
     pub fn line_height(&self, grid: Rhythm) -> f32 {
         grid.size() * self.line_rhythms as f32
     }
 
     /// Extra space split above and below the `ascent + descent` box.
+    #[inline]
     pub fn half_leading(&self, grid: Rhythm) -> f32 {
         (self.line_height(grid) - self.ascent - self.descent) / 2.0
     }
 
     /// Distance from the top of the line box down to the baseline.
+    #[inline]
     pub fn baseline_above(&self, grid: Rhythm) -> f32 {
         self.half_leading(grid) + self.ascent
     }
 
     /// Distance from the baseline down to the bottom of the line box.
+    #[inline]
     pub fn baseline_below(&self, grid: Rhythm) -> f32 {
         self.half_leading(grid) + self.descent
     }
@@ -350,13 +370,24 @@ impl FontRhythm {
     /// a leading-trim (CSS `text-box-trim`) would remove. Subtract it from a top
     /// spacing (or apply as negative margin) to visually butt capitals against an
     /// edge or grid line.
+    #[inline]
     pub fn cap_trim_top(&self, grid: Rhythm) -> Option<f32> {
         Some(self.baseline_above(grid) - self.cap_height?)
     }
 
     /// Like [`Self::cap_trim_top`] but trimming to the x-height.
+    #[inline]
     pub fn x_trim_top(&self, grid: Rhythm) -> Option<f32> {
         Some(self.baseline_above(grid) - self.x_height?)
+    }
+
+    /// This style's line placement on `grid` as a
+    /// [`RhythmLineMetrics`](crate::RhythmLineMetrics) — the same value a
+    /// shaped line produces, so a custom renderer can place single-style
+    /// text (and empty lines) through one code path.
+    #[inline]
+    pub fn line_metrics(&self, grid: Rhythm) -> crate::RhythmLineMetrics {
+        crate::RhythmLineMetrics::new(self.ascent, self.descent, self.line_rhythms, grid)
     }
 
     /// Solve a drop cap sunk `lines` lines deep into text set in `self`.
@@ -429,6 +460,7 @@ pub struct DropCapRhythm {
 impl DropCapRhythm {
     /// Cap-face metrics at the solved size. The line box spans the sunk lines
     /// exactly: `line_rhythms` is `lines ×` the body's `line_rhythms`.
+    #[inline]
     pub const fn metrics(&self) -> &FontRhythm {
         &self.metrics
     }
@@ -439,6 +471,7 @@ impl DropCapRhythm {
     /// exceeding `ascent − descent`, e.g. Merriweather) yield a positive
     /// offset, and as a margin it would grow the row's cross size and push
     /// everything below off the grid.
+    #[inline]
     pub const fn top(&self) -> f32 {
         self.top
     }

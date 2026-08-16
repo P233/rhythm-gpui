@@ -35,6 +35,62 @@ embeds) no longer knocks everything after it off the grid:
   no layout shift.
 - Demo: a fluid-width image with a pad/crop toolbar toggle.
 
+Shaped-line placement — a line mixing explicit font runs (bold/italic,
+inline code, an explicit CJK or emoji face) shapes to the maximum
+ascent/descent over its runs, which primary-font metrics cannot describe.
+A new value-only layer makes that the supported path for custom document
+renderers, and retires the old "lay each font out as its own element"
+advice:
+
+- `RhythmLineMetrics`: placement from a shaped line's real
+  `ascent()`/`descent()` — `line_height`, `baseline_above`/`baseline_below`,
+  `half_leading`, `paint_origin_for(target_baseline)`, and the advisory
+  `min_line_rhythms` / `overflows_line_box` pair for ink taller than the
+  chosen line box. Factories: `RhythmGrid::line_metrics(ascent, descent, n)`,
+  `RhythmFont::line_metrics()`, `FontRhythm::line_metrics(grid)`.
+- `RhythmBlockMetrics`: whole-row block geometry over one line's metrics —
+  baseline anchors (`new`) or cap-ink anchors (`cap`, the pure form of the
+  `cap_top`/`cap_bottom` pair), `opening`/`closing`, `first_baseline`, exact
+  integer `rows`, and first/middle/last fragment heights that keep the
+  rhythm phase across virtualized splits.
+- Glyph-level fallback still needs no special handling: substituted glyphs
+  never enter a line's shaped ascent (CoreText-verified).
+- `direct_paint` example: resolve a font set once, shape and cache
+  `WrappedLine`s, place them with the metrics types, and paint directly.
+
+Resolved-font lifecycle, now a documented contract — within the crate, only
+the resolution factories touch the `TextSystem`; the `Rhythm`, `FontRhythm`,
+and line/block geometry paths afterwards are allocation-free, lock-free
+`Copy` math (enforced by a counting-allocator test). `cargo bench --bench
+resolve` tracks warm resolution, deliberately without ns-level CI thresholds:
+
+- `RhythmFontSpec`: the pre-resolve identity (`Font`, size, line rhythms,
+  grid size) as an `Eq + Hash` cache key, with `spec.resolve(ts)` and
+  `font.spec()` for TextSystem-resolved values (`None` for synthesized
+  baseline-ratio values). The crate keeps no font cache of its own. Families
+  must be registered before first resolution because gpui caches failed font
+  requests inside the `TextSystem`.
+- `RhythmFont::resolved_font_id()`: the `FontId` the metrics came from
+  (`None` for `from_baseline_ratio` values). Valid only in the resolving
+  `TextSystem`; there is intentionally no `was_fallback` flag, since gpui
+  cannot answer that precisely.
+
+Verification and fixes:
+
+- Real-shaping integration suite (`tests/shaping.rs`, macOS/CoreText, its
+  own binary because AppKit needs the main thread): single-run metric parity
+  with an OpenType descent-sign guard, mixed-run maxima, glyph-fallback
+  non-inflation, and overflow behavior, using bundled OFL Noto fonts
+  (`tests/fonts/`, excluded from the published package — the suite
+  self-skips without them). Found upstream: `TextSystem::baseline_offset`
+  disagrees with the paint path by one descent on macOS (raw negative
+  descent vs shaped positive), so the paint equation is the oracle instead.
+- `rhythm_overlay` now paints only the rows intersecting the visible region
+  (content mask), keeping the stripe phase anchored to the container — debug
+  overlays on very tall documents cost `O(viewport)`, not `O(document)`.
+- Platform scope: mixed-run and glyph-fallback semantics are verified on
+  macOS/CoreText only; other gpui text backends are not assumed identical.
+
 ## 0.1.0 (2026-08-15)
 
 Initial release: vertical rhythm typography for gpui, ported from
