@@ -53,6 +53,18 @@ advice:
   `cap_top`/`cap_bottom` pair), `opening`/`closing`, `first_baseline`, exact
   integer `rows`, and first/middle/last fragment heights that keep the
   rhythm phase across virtualized splits.
+- `RhythmBlockMetrics::first_rows` / `middle_rows` / `last_rows`: ordered
+  integer cursor transitions that partition `rows` precisely across split
+  blocks. `continuation_baseline` restores the baseline (including a cap
+  anchor's phase) only when a fragment is painted, so virtualized renderers do
+  not accumulate drifting `f32` heights.
+- `RhythmLineMetrics::at_least` and `RhythmGrid::line_metrics_at_least`: build
+  a line whose configured height is a floor, growing the box to
+  `min_line_rhythms` in one step instead of constructing the metrics twice.
+- `Pixels`-typed `_px` mirrors on both metric types under the `gpui` feature
+  (`line_height_px`, `baseline_above_px`, `paint_origin_for_px`, the block
+  baselines/openings/heights, …), so the paint path keeps the type end to end
+  instead of unwrapping with `f32::from` and rewrapping with `px`.
 - Glyph-level fallback still needs no special handling: substituted glyphs
   never enter a line's shaped ascent (CoreText-verified).
 - `direct_paint` example: resolve a font set once, shape and cache

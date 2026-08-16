@@ -8,6 +8,10 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(feature = "gpui")]
+use gpui::px;
+#[cfg(feature = "gpui")]
+use rhythm_gpui::RhythmGrid;
 use rhythm_gpui::{FontRhythm, Rhythm, RhythmBlockMetrics, RhythmLineMetrics};
 
 struct CountingAlloc;
@@ -31,14 +35,18 @@ static GLOBAL: CountingAlloc = CountingAlloc;
 #[test]
 fn hot_path_geometry_allocates_nothing() {
     let grid = Rhythm::new(8.0);
+    #[cfg(feature = "gpui")]
+    let typed_grid = RhythmGrid::new(px(8.0));
     // Georgia-like metrics at 16px on a 3-unit line.
     let font = FontRhythm::from_platform_metrics(16.0, 3, 14.67, -3.51, 11.09, 7.70);
 
     let before = ALLOCS.load(Ordering::Relaxed);
     let mut acc = 0.0f32;
     for i in 0..10_000u32 {
-        let ascent = 14.0 + (i % 7) as f32 * 0.5;
-        let line = RhythmLineMetrics::new(ascent, 3.51, 3, grid);
+        // Alternate across the 24px floor so `at_least` exercises both its
+        // unchanged and grown line-box paths inside the allocator window.
+        let ascent = 14.0 + (i % 16) as f32;
+        let line = RhythmLineMetrics::at_least(ascent, 3.51, 3, grid);
         let block = RhythmBlockMetrics::new(line, 3, 1);
         acc += line.paint_origin_for(grid.height(5))
             + line.baseline_above()
@@ -48,10 +56,33 @@ fn hot_path_geometry_allocates_nothing() {
             + block.first_height(2)
             + block.last_height(5)
             + block.rows(7) as f32
+            + block.first_rows(2) as f32
+            + block.middle_rows(4) as f32
+            + block.last_rows(5) as f32
             + grid.baseline_top(&font, 3)
             + grid.baseline_between(&font, &font, 6)
             + font.line_metrics(grid).baseline_below()
             + grid.snap_up(450.0 + i as f32);
+
+        #[cfg(feature = "gpui")]
+        {
+            let typed_line = typed_grid.line_metrics_at_least(px(ascent), px(3.51), 3);
+            acc += f32::from(typed_line.ascent_px())
+                + f32::from(typed_line.descent_px())
+                + f32::from(typed_line.line_height_px())
+                + f32::from(typed_line.half_leading_px())
+                + f32::from(typed_line.baseline_above_px())
+                + f32::from(typed_line.baseline_below_px())
+                + f32::from(typed_line.paint_origin_for_px(px(grid.height(5))))
+                + f32::from(block.opening_px())
+                + f32::from(block.closing_px())
+                + f32::from(block.first_baseline_px())
+                + f32::from(block.continuation_baseline_px(block.first_rows(2)))
+                + f32::from(block.height_px(7))
+                + f32::from(block.first_height_px(2))
+                + f32::from(block.middle_height_px(4))
+                + f32::from(block.last_height_px(5));
+        }
     }
     let after = ALLOCS.load(Ordering::Relaxed);
     std::hint::black_box(acc);

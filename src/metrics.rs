@@ -87,6 +87,26 @@ impl RhythmLineMetrics {
         }
     }
 
+    /// Like [`new`](Self::new), but grows the line box to
+    /// [`min_line_rhythms`](Self::min_line_rhythms) when `line_rhythms` is too
+    /// small to contain the shaped ink: the one-step form of building the
+    /// metrics, asking for the minimum, and rebuilding at the maximum of the
+    /// two. Use it where the style's configured line height is a floor rather
+    /// than a promise — a line whose explicit runs shaped taller than the
+    /// style predicted.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`new`](Self::new), or when the
+    /// minimum fitting count does not fit in `u32`.
+    pub fn at_least(ascent: f32, descent: f32, line_rhythms: u32, grid: Rhythm) -> Self {
+        let line = Self::new(ascent, descent, line_rhythms, grid);
+        Self {
+            line_rhythms: line_rhythms.max(line.min_line_rhythms()),
+            ..line
+        }
+    }
+
     /// The shaped ascent above the baseline, non-negative.
     #[inline]
     pub const fn ascent(&self) -> f32 {
@@ -220,6 +240,12 @@ impl RhythmLineMetrics {
 /// [`first_baseline`](Self::first_baseline) below the block top in a
 /// first/single fragment, and [`RhythmLineMetrics::baseline_above`] below the
 /// fragment top in a middle/last fragment.
+///
+/// [`first_rows`](Self::first_rows) / [`middle_rows`](Self::middle_rows) /
+/// [`last_rows`](Self::last_rows) form an exact integer cursor for a block
+/// split across virtualized fragments. Use [`continuation_baseline`](Self::continuation_baseline)
+/// to turn that cursor into the next fragment's baseline without accumulating
+/// `f32` heights.
 ///
 /// # Examples
 ///
@@ -405,17 +431,107 @@ impl RhythmBlockMetrics {
     /// `i32`.
     #[inline]
     pub fn rows(&self, lines: u32) -> i32 {
-        assert!(lines > 0, "a fragment must contain at least one line");
-        let spanned = if self.cap_height.is_some() {
-            lines
-        } else {
-            lines - 1
-        };
-        let rows = i128::from(self.top)
-            + i128::from(self.bottom)
-            + i128::from(spanned) * i128::from(self.line.line_rhythms());
-        i32::try_from(rows).expect("block row count exceeds i32")
+        checked_rows(
+            i128::from(self.top) + self.spanned_rows(lines) + i128::from(self.bottom)
+                - self.trailing_rows(),
+        )
     }
+
+    /// Row-cursor delta from the block top to the baseline immediately after a
+    /// *first* fragment of `lines` visual lines. Add it to the block's starting
+    /// row, then pass the result to [`continuation_baseline`](Self::continuation_baseline)
+    /// to place the first line of the next fragment.
+    ///
+    /// This and its two siblings partition [`rows`](Self::rows) exactly:
+    /// `first_rows(a) + middle_rows(b) + last_rows(c) == rows(a + b + c)`.
+    /// These values are cursor transitions, not fragment heights converted to
+    /// rows: continuation fragments start at a line-box top, generally between
+    /// grid lines. Keeping the cursor as rows and deriving only the visible
+    /// fragment's baseline prevents accumulated floating-point drift.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rhythm_gpui::{Rhythm, RhythmBlockMetrics, RhythmLineMetrics};
+    ///
+    /// let grid = Rhythm::new(8.0);
+    /// let line = RhythmLineMetrics::new(14.67, 3.51, 3, grid);
+    /// let block = RhythmBlockMetrics::new(line, 3, 1);
+    ///
+    /// // A nine-line block split 2 / 4 / 3 across three viewport pages.
+    /// let mut cursor = block.first_rows(2);
+    /// let middle_baseline = block.continuation_baseline(cursor);
+    /// assert!((line.paint_origin_for(middle_baseline) - block.first_height(2)).abs() < 1e-3);
+    /// cursor = cursor.checked_add(block.middle_rows(4)).unwrap();
+    /// cursor = cursor.checked_add(block.last_rows(3)).unwrap();
+    /// assert_eq!(cursor, block.rows(9));
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics when `lines` is zero or the row count does not fit in `i32`.
+    #[inline]
+    pub fn first_rows(&self, lines: u32) -> i32 {
+        checked_rows(i128::from(self.top) + self.spanned_rows(lines))
+    }
+
+    /// Row-cursor delta across a *middle* fragment of `lines` visual lines:
+    /// `lines × line_rhythms`. The cursor points to the fragment's first
+    /// baseline before this delta and the following fragment's first baseline
+    /// after it. See [`first_rows`](Self::first_rows) for the full contract.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `lines` is zero or the row count does not fit in `i32`.
+    #[inline]
+    pub fn middle_rows(&self, lines: u32) -> i32 {
+        checked_rows(self.spanned_rows(lines))
+    }
+
+    /// The baseline for a continuation fragment at an accumulated `row`
+    /// cursor. Baseline-anchored blocks land directly on that grid row;
+    /// cap-anchored blocks retain their cap-height phase.
+    ///
+    /// Pass this to [`RhythmLineMetrics::paint_origin_for`] to derive the
+    /// fragment's line-box top without accumulating preceding `f32` heights.
+    #[inline]
+    pub fn continuation_baseline(&self, row: i32) -> f32 {
+        self.grid().height(row) + self.cap_height.unwrap_or(0.0)
+    }
+
+    /// Row-cursor delta from the first baseline of a *last* fragment of
+    /// `lines` visual lines to the block's whole-row bottom edge. Baseline
+    /// anchors use `lines − 1` line advances before the closing; cap anchors
+    /// retain the extra advance that returns their cap-height phase. See
+    /// [`first_rows`](Self::first_rows) for the full contract.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `lines` is zero or the row count does not fit in `i32`.
+    #[inline]
+    pub fn last_rows(&self, lines: u32) -> i32 {
+        checked_rows(self.spanned_rows(lines) + i128::from(self.bottom) - self.trailing_rows())
+    }
+
+    #[inline]
+    fn trailing_rows(&self) -> i128 {
+        if self.cap_height.is_some() {
+            0
+        } else {
+            i128::from(self.line.line_rhythms())
+        }
+    }
+
+    #[inline]
+    fn spanned_rows(&self, lines: u32) -> i128 {
+        assert!(lines > 0, "a fragment must contain at least one line");
+        i128::from(lines) * i128::from(self.line.line_rhythms())
+    }
+}
+
+#[inline]
+fn checked_rows(rows: i128) -> i32 {
+    i32::try_from(rows).expect("block row count exceeds i32")
 }
 
 #[cfg(test)]
@@ -593,6 +709,85 @@ mod tests {
             let rows = baseline / GRID.size();
             assert!((rows - rows.round()).abs() < 1e-3, "off grid: {baseline}");
         }
+    }
+
+    #[test]
+    fn fragment_rows_partition_the_block_exactly() {
+        for block in [
+            RhythmBlockMetrics::new(georgia_line(), 3, 1),
+            RhythmBlockMetrics::cap(georgia_line(), 11.09, 3, 0),
+            RhythmBlockMetrics::new(georgia_line(), -2, 1),
+            RhythmBlockMetrics::cap(georgia_line(), 11.09, -2, -1),
+        ] {
+            let line_rhythms = block.line().line_rhythms() as i32;
+            assert_eq!(
+                block.first_rows(2) + block.middle_rows(4) + block.last_rows(3),
+                block.rows(9)
+            );
+            assert_eq!(block.first_rows(1) + block.last_rows(1), block.rows(2));
+            assert_eq!(block.first_rows(5), block.top() + 5 * line_rhythms);
+            assert_eq!(block.middle_rows(4), 4 * line_rhythms);
+            let trailing = if block.is_cap_anchored() {
+                0
+            } else {
+                line_rhythms
+            };
+            assert_eq!(
+                block.last_rows(3),
+                3 * line_rhythms + block.bottom() - trailing
+            );
+        }
+    }
+
+    #[test]
+    fn fragment_row_cursor_reconstructs_every_continuation_origin() {
+        for block in [
+            RhythmBlockMetrics::new(georgia_line(), 3, 1),
+            RhythmBlockMetrics::cap(georgia_line(), 11.09, 3, 0),
+            RhythmBlockMetrics::new(georgia_line(), -2, 1),
+            RhythmBlockMetrics::cap(georgia_line(), 11.09, -2, -1),
+        ] {
+            let mut rows = block.first_rows(2);
+            let mut height = block.first_height(2);
+            for lines in [4, 1, 3] {
+                let origin = block
+                    .line()
+                    .paint_origin_for(block.continuation_baseline(rows));
+                assert!((origin - height).abs() < 1e-3);
+                rows = rows
+                    .checked_add(block.middle_rows(lines))
+                    .expect("test row cursor overflowed");
+                height += block.middle_height(lines);
+            }
+
+            let last_origin = block
+                .line()
+                .paint_origin_for(block.continuation_baseline(rows));
+            assert!((last_origin - height).abs() < 1e-3);
+            rows = rows
+                .checked_add(block.last_rows(2))
+                .expect("test row cursor overflowed");
+            height += block.last_height(2);
+            assert_eq!(rows, block.rows(2 + 4 + 1 + 3 + 2));
+            assert!((height - GRID.height(rows)).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn at_least_grows_the_line_box_only_when_the_ink_overflows() {
+        // The 3-row box cannot hold 26px of ink; four rows can.
+        let grown = RhythmLineMetrics::at_least(20.0, 6.0, 3, GRID);
+        assert_eq!(grown.line_rhythms(), 4);
+        assert!(!grown.overflows_line_box());
+        // A configured height with room to spare is kept as chosen.
+        let roomy = RhythmLineMetrics::at_least(20.0, 6.0, 6, GRID);
+        assert_eq!(roomy.line_rhythms(), 6);
+        // Ink that already fits leaves the line untouched.
+        let line = georgia_line();
+        assert_eq!(
+            RhythmLineMetrics::at_least(line.ascent(), line.descent(), 3, GRID),
+            line
+        );
     }
 
     #[test]

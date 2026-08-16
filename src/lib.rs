@@ -53,9 +53,12 @@
 //! from each shaped line's real `ascent()` / `descent()` — the maxima over its
 //! explicit font runs, which is how lines mixing bold, inline code, CJK, or
 //! emoji faces actually shape — lay blocks out with [`RhythmBlockMetrics`]
-//! (including first/middle/last fragment heights for virtualization), and
-//! place every baseline with `paint_origin_for`. The `direct_paint` example is
-//! the complete recipe.
+//! (first/middle/last fragment heights, plus the integer `first_rows` /
+//! `middle_rows` / `last_rows` cursor and `continuation_baseline` for split
+//! blocks), and place every baseline with `paint_origin_for`. Under the `gpui`
+//! feature both metric types also expose `Pixels`-typed `_px` mirrors, so the
+//! paint path never converts by hand. The `direct_paint` example is the
+//! complete recipe.
 //!
 //! # Performance contract
 //!

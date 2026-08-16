@@ -162,6 +162,19 @@ fragment heights that keep the rhythm phase across virtualized splits), and
 place every baseline with `paint_origin_for(target)`. Glyph fallback needs no
 special handling: substituted glyphs never grow the line box.
 
+Two conveniences for that path: `first_rows` / `middle_rows` / `last_rows` are
+ordered integer cursor transitions that partition `rows(lines)` across a split
+block. After a first or middle fragment, `continuation_baseline(cursor)` turns
+the accumulated row back into the next baseline (including a cap anchor's
+phase); `paint_origin_for` then locates that fragment's line-box top. A
+virtualizer therefore converts only visible positions instead of summing `f32`
+heights over thousands of blocks. `line_metrics_at_least(ascent, descent, n)`
+also treats the style's line height as a floor, growing the box in one step when
+an explicit run shaped taller than the style predicted. Both metric types carry
+`Pixels`-typed `_px` mirrors (`line_height_px`, `baseline_above_px`,
+`paint_origin_for_px`, the block baselines and heights) so a gpui paint path
+never converts by hand.
+
 The lifecycle contract: a `RhythmFont` is an immutable resolved value. Within
 the crate, only its resolution factories query the `TextSystem`; document
 renderers still use `shape_text` when their shaped-line cache is stale. Once

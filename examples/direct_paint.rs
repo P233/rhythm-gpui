@@ -83,6 +83,7 @@ struct CachedBlock {
 }
 
 struct DocLayout {
+    grid: RhythmGrid,
     width: Pixels,
     blocks: Vec<CachedBlock>,
 }
@@ -186,16 +187,17 @@ impl DirectPaint {
                 .shape_text(text.into(), para.font_size, &runs, Some(wrap), None)
                 .expect("shape direct-paint paragraph");
             for line in lines {
-                // 3. Shaped maxima → line metrics. The base line height comes
-                //    from the paragraph's style; min_line_rhythms grows it
-                //    when an explicit run's ink would not fit.
-                let base = grid
-                    .line_metrics(line.ascent(), line.descent(), 3)
-                    .min_line_rhythms()
-                    .max(if para.font_size == px(28.) { 5 } else { 3 });
-                let metrics = grid.line_metrics(line.ascent(), line.descent(), base);
+                // 3. Shaped maxima → line metrics. The paragraph's style sets
+                //    the line height as a floor; `at_least` grows the box when
+                //    an explicit run's ink would not fit.
+                let base = if para.font_size == px(28.) { 5 } else { 3 };
+                let metrics = grid.line_metrics_at_least(line.ascent(), line.descent(), base);
                 let block = RhythmBlockMetrics::new(metrics, para.top, para.bottom);
                 let visual_lines = line.wrap_boundaries.len() as u32 + 1;
+                // Exact integer rows, never accumulated f32 heights. A
+                // virtualizer that splits a block across pages advances its
+                // cursor with first_rows / middle_rows / last_rows instead;
+                // they partition this same count.
                 let block_rows = block.rows(visual_lines);
                 blocks.push(CachedBlock {
                     line,
@@ -208,7 +210,11 @@ impl DirectPaint {
                     .expect("direct-paint document exceeds i32 grid rows");
             }
         }
-        DocLayout { width, blocks }
+        DocLayout {
+            grid,
+            width,
+            blocks,
+        }
     }
 }
 
@@ -287,17 +293,16 @@ impl Element for DocumentElement {
         for cached in &layout.blocks {
             // 4. Target the first baseline, derive the paint origin, and let
             //    the whole-row line height carry every wrapped line after it.
-            let target =
-                cached.metrics.grid().height(cached.top_row) + cached.block.first_baseline();
-            let origin_y = cached.metrics.paint_origin_for(target);
-            let origin = point(bounds.origin.x + px(MARGIN), bounds.origin.y + px(origin_y));
+            let target = layout.grid.height(cached.top_row) + cached.block.first_baseline_px();
+            let origin_y = cached.metrics.paint_origin_for_px(target);
+            let origin = point(bounds.origin.x + px(MARGIN), bounds.origin.y + origin_y);
             // 5. Paint the cached shaped line — every visual line advances by
             //    the same whole-row line height.
             cached
                 .line
                 .paint(
                     origin,
-                    px(cached.metrics.line_height()),
+                    cached.metrics.line_height_px(),
                     TextAlign::Left,
                     None,
                     window,

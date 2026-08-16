@@ -6,7 +6,7 @@ use gpui::{
     Pixels, Styled, TextSystem,
 };
 
-use crate::{FontRhythm, Rhythm, RhythmLineMetrics};
+use crate::{FontRhythm, Rhythm, RhythmBlockMetrics, RhythmLineMetrics};
 
 fn assert_valid_font_request(font: &Font, font_size: Pixels, line_rhythms: u32) {
     assert!(
@@ -101,6 +101,18 @@ impl RhythmGrid {
         RhythmLineMetrics::new(ascent.into(), descent.into(), line_rhythms, self.core())
     }
 
+    /// [`line_metrics`](Self::line_metrics) with `line_rhythms` as a floor
+    /// rather than a promise: the line box grows to hold ink that shaped
+    /// taller than the style predicted. See [`RhythmLineMetrics::at_least`].
+    pub fn line_metrics_at_least(
+        &self,
+        ascent: Pixels,
+        descent: Pixels,
+        line_rhythms: u32,
+    ) -> RhythmLineMetrics {
+        RhythmLineMetrics::at_least(ascent.into(), descent.into(), line_rhythms, self.core())
+    }
+
     /// Resolve a font bound to this grid — [`RhythmFont::resolve`] with the
     /// grid slot filled in; see it for the fallback-resolution caveats.
     pub fn font(
@@ -171,6 +183,126 @@ impl RhythmGrid {
     pub fn cap_bottom(&self, font: &RhythmFont, m: i32) -> Option<Pixels> {
         self.assert_font(font);
         font.cap_bottom(m)
+    }
+}
+
+/// `Pixels`-typed mirrors of the shaped-line geometry, so a gpui paint path
+/// carries the type end to end instead of unwrapping arguments with
+/// `f32::from` and rewrapping results with `px`. Each is the identically named
+/// `f32` method, converted; the pure-math layer stays free of gpui.
+impl RhythmLineMetrics {
+    /// [`ascent`](Self::ascent) in `Pixels`.
+    #[inline]
+    pub fn ascent_px(&self) -> Pixels {
+        px(self.ascent())
+    }
+
+    /// [`descent`](Self::descent) in `Pixels`.
+    #[inline]
+    pub fn descent_px(&self) -> Pixels {
+        px(self.descent())
+    }
+
+    /// [`line_height`](Self::line_height) in `Pixels` — the value
+    /// `WrappedLine::paint` takes.
+    #[inline]
+    pub fn line_height_px(&self) -> Pixels {
+        px(self.line_height())
+    }
+
+    /// [`half_leading`](Self::half_leading) in `Pixels`.
+    #[inline]
+    pub fn half_leading_px(&self) -> Pixels {
+        px(self.half_leading())
+    }
+
+    /// [`baseline_above`](Self::baseline_above) in `Pixels`.
+    #[inline]
+    pub fn baseline_above_px(&self) -> Pixels {
+        px(self.baseline_above())
+    }
+
+    /// [`baseline_below`](Self::baseline_below) in `Pixels`.
+    #[inline]
+    pub fn baseline_below_px(&self) -> Pixels {
+        px(self.baseline_below())
+    }
+
+    /// [`paint_origin_for`](Self::paint_origin_for) in `Pixels` — the
+    /// `origin.y` for `WrappedLine::paint`, from a `Pixels` target baseline.
+    #[inline]
+    pub fn paint_origin_for_px(&self, target_baseline: Pixels) -> Pixels {
+        px(self.paint_origin_for(target_baseline.into()))
+    }
+}
+
+/// `Pixels`-typed mirrors of the block geometry; see the
+/// [`RhythmLineMetrics`] mirrors for the rationale. The row counts
+/// ([`rows`](Self::rows), [`first_rows`](Self::first_rows) and siblings) stay
+/// `i32`: they are grid rows, not lengths.
+impl RhythmBlockMetrics {
+    /// [`opening`](Self::opening) in `Pixels`.
+    #[inline]
+    pub fn opening_px(&self) -> Pixels {
+        px(self.opening())
+    }
+
+    /// [`closing`](Self::closing) in `Pixels`.
+    #[inline]
+    pub fn closing_px(&self) -> Pixels {
+        px(self.closing())
+    }
+
+    /// [`first_baseline`](Self::first_baseline) in `Pixels`.
+    #[inline]
+    pub fn first_baseline_px(&self) -> Pixels {
+        px(self.first_baseline())
+    }
+
+    /// [`continuation_baseline`](Self::continuation_baseline) in `Pixels`.
+    #[inline]
+    pub fn continuation_baseline_px(&self, row: i32) -> Pixels {
+        px(self.continuation_baseline(row))
+    }
+
+    /// [`height`](Self::height) in `Pixels`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `lines` is zero.
+    #[inline]
+    pub fn height_px(&self, lines: u32) -> Pixels {
+        px(self.height(lines))
+    }
+
+    /// [`first_height`](Self::first_height) in `Pixels`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `lines` is zero.
+    #[inline]
+    pub fn first_height_px(&self, lines: u32) -> Pixels {
+        px(self.first_height(lines))
+    }
+
+    /// [`middle_height`](Self::middle_height) in `Pixels`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `lines` is zero.
+    #[inline]
+    pub fn middle_height_px(&self, lines: u32) -> Pixels {
+        px(self.middle_height(lines))
+    }
+
+    /// [`last_height`](Self::last_height) in `Pixels`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `lines` is zero.
+    #[inline]
+    pub fn last_height_px(&self, lines: u32) -> Pixels {
+        px(self.last_height(lines))
     }
 }
 
@@ -791,6 +923,51 @@ mod tests {
         fn style(&mut self) -> &mut StyleRefinement {
             &mut self.style
         }
+    }
+
+    #[test]
+    fn pixels_mirrors_agree_with_the_math_layer() {
+        let grid = RhythmGrid::new(px(8.0));
+        let line = grid.line_metrics(px(14.67), px(3.51), 3);
+        assert_eq!(line.ascent_px(), px(line.ascent()));
+        assert_eq!(line.descent_px(), px(line.descent()));
+        assert_eq!(line.line_height_px(), px(line.line_height()));
+        assert_eq!(line.half_leading_px(), px(line.half_leading()));
+        assert_eq!(line.baseline_above_px(), px(line.baseline_above()));
+        assert_eq!(line.baseline_below_px(), px(line.baseline_below()));
+
+        let target = grid.height(5);
+        assert_eq!(
+            line.paint_origin_for_px(target),
+            px(line.paint_origin_for(target.into()))
+        );
+
+        let block = RhythmBlockMetrics::new(line, 3, 1);
+        assert_eq!(block.opening_px(), px(block.opening()));
+        assert_eq!(block.closing_px(), px(block.closing()));
+        assert_eq!(block.first_baseline_px(), px(block.first_baseline()));
+        assert_eq!(
+            block.continuation_baseline_px(block.first_rows(2)),
+            px(block.continuation_baseline(block.first_rows(2)))
+        );
+        assert_eq!(block.height_px(5), px(block.height(5)));
+        assert_eq!(block.first_height_px(2), px(block.first_height(2)));
+        assert_eq!(block.middle_height_px(4), px(block.middle_height(4)));
+        assert_eq!(block.last_height_px(3), px(block.last_height(3)));
+    }
+
+    #[test]
+    fn line_metrics_at_least_grows_the_box_in_one_step() {
+        let grid = RhythmGrid::new(px(8.0));
+        // 26px of ink overflows a 3-row box; the floor is raised to 4 rows.
+        let grown = grid.line_metrics_at_least(px(20.0), px(6.0), 3);
+        assert_eq!(grown.line_rhythms(), 4);
+        assert!(!grown.overflows_line_box());
+        assert_eq!(
+            grid.line_metrics_at_least(px(14.67), px(3.51), 3)
+                .line_rhythms(),
+            3
+        );
     }
 
     #[test]
