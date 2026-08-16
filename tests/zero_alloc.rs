@@ -62,6 +62,7 @@ fn hot_path_geometry_allocates_nothing() {
             + grid.baseline_top(&font, 3)
             + grid.baseline_between(&font, &font, 6)
             + font.line_metrics(grid).baseline_below()
+            + RhythmLineMetrics::covering(&[line, font.line_metrics(grid)], grid).line_height()
             + grid.snap_up(450.0 + i as f32);
 
         #[cfg(feature = "gpui")]

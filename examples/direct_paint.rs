@@ -6,12 +6,14 @@
 //! The recipe, per the numbered comments below:
 //!
 //! 1. Resolve a `FontSet` once at startup — font-metric resolution happens
-//!    only here.
+//!    only here. A style resolves *covering* the faces its runs can use, so
+//!    its line height holds any mixture of them before anything is shaped.
 //! 2. Use the window's `TextSystem` to shape paragraphs when the wrap width
 //!    changes, and cache the `WrappedLine`s in the view.
 //! 3. Build `RhythmLineMetrics` from each line's *shaped* `ascent()` /
-//!    `descent()` — for mixed explicit runs these are the maxima over the
-//!    runs, which is where the baseline actually goes.
+//!    `descent()` at that fixed row budget — for mixed explicit runs these
+//!    are the maxima over the runs, which is where the baseline actually
+//!    goes.
 //! 4. Place blocks with `RhythmBlockMetrics` and each line with
 //!    `paint_origin_for`, so every baseline lands on the grid.
 //! 5. Paint the cached lines directly; wrapped continuation lines advance by
@@ -31,7 +33,9 @@ use gpui::{
     Render, Style, TextAlign, TextRun, TextSystem, Window, WindowBounds, WindowOptions,
     WrappedLine,
 };
-use rhythm_gpui::{RhythmBlockMetrics, RhythmFont, RhythmGrid, RhythmLineMetrics, RhythmStyled};
+use rhythm_gpui::{
+    RhythmBlockMetrics, RhythmFont, RhythmFontSpec, RhythmGrid, RhythmLineMetrics, RhythmStyled,
+};
 
 /// 1. The text styles, resolved once at startup. Placement below uses only
 ///    stored metrics; shaping remains an explicit `TextSystem` cache-miss path.
@@ -50,13 +54,30 @@ impl FontSet {
         heading.weight = FontWeight::BOLD;
         let mut bold = font("Georgia");
         bold.weight = FontWeight::BOLD;
+
+        let body_spec = RhythmFontSpec::new(font("Georgia"), px(16.), 3, grid);
+        let runs = [
+            RhythmFontSpec::new(bold, px(16.), 3, grid),
+            RhythmFontSpec::new(font("Menlo"), px(16.), 3, grid),
+            RhythmFontSpec::new(font("PingFang SC"), px(16.), 3, grid),
+            RhythmFontSpec::new(font("Apple Color Emoji"), px(16.), 3, grid),
+        ];
+
         Self {
             heading: grid.font(text_system, heading, px(28.), 5),
-            body: grid.font(text_system, font("Georgia"), px(16.), 3),
-            bold: grid.font(text_system, bold, px(16.), 3),
-            mono: grid.font(text_system, font("Menlo"), px(16.), 3),
-            cjk: grid.font(text_system, font("PingFang SC"), px(16.), 3),
-            emoji: grid.font(text_system, font("Apple Color Emoji"), px(16.), 3),
+            // 1a. The body's line height must hold any mixture of the faces
+            //     its runs use, so it is resolved covering the whole set:
+            //     three rows if they all fit, more if one does not. The row
+            //     budget is settled here, at startup, so a block's height
+            //     follows from its line count without shaping — the property
+            //     a virtualized renderer is built on. The run faces are
+            //     resolved for their `Font` configuration; placement always
+            //     goes through the paragraph style's budget.
+            body: body_spec.resolve_covering(text_system, &runs),
+            bold: runs[0].resolve(text_system),
+            mono: runs[1].resolve(text_system),
+            cjk: runs[2].resolve(text_system),
+            emoji: runs[3].resolve(text_system),
         }
     }
 }
@@ -64,11 +85,12 @@ impl FontSet {
 /// One styled span of a paragraph: its text, font, and color.
 struct Span(&'static str, Font, u32);
 
-/// A paragraph to shape: spans, the font size to shape at, and the block's
-/// opening/closing rhythm counts.
+/// A paragraph to shape: spans, the font size to shape at, the style's line
+/// height in whole rhythm units, and the block's opening/closing counts.
 struct Paragraph {
     spans: Vec<Span>,
     font_size: Pixels,
+    line_rhythms: u32,
     top: i32,
     bottom: i32,
 }
@@ -106,6 +128,7 @@ impl DirectPaint {
             Paragraph {
                 spans: vec![Span("Direct paint", set.heading.font().clone(), ink)],
                 font_size: set.heading.font_size(),
+                line_rhythms: set.heading.metrics().line_rhythms(),
                 top: 6,
                 bottom: 0,
             },
@@ -119,13 +142,14 @@ impl DirectPaint {
                     ink,
                 )],
                 font_size: set.body.font_size(),
+                line_rhythms: set.body.metrics().line_rhythms(),
                 top: 6,
                 bottom: 0,
             },
             // 3. Explicit mixed runs: bold, inline code, CJK, and emoji faces
-            //    enter the shaped maxima, so this line box may be taller than
-            //    the body font alone — RhythmLineMetrics reads that from the
-            //    shaped result and the baseline still lands on the grid.
+            //    enter the shaped maxima, so their ink box may be taller than
+            //    the body font's — RhythmLineMetrics reads that from the
+            //    shaped result while the covering line height stays fixed.
             Paragraph {
                 spans: vec![
                     Span("Explicit runs: ", set.body.font().clone(), ink),
@@ -139,6 +163,7 @@ impl DirectPaint {
                     Span(" share one shaped baseline.", set.body.font().clone(), ink),
                 ],
                 font_size: set.body.font_size(),
+                line_rhythms: set.body.metrics().line_rhythms(),
                 top: 6,
                 bottom: 0,
             },
@@ -155,6 +180,7 @@ impl DirectPaint {
                     ink,
                 )],
                 font_size: set.body.font_size(),
+                line_rhythms: set.body.metrics().line_rhythms(),
                 top: 6,
                 bottom: 3,
             },
@@ -187,11 +213,13 @@ impl DirectPaint {
                 .shape_text(text.into(), para.font_size, &runs, Some(wrap), None)
                 .expect("shape direct-paint paragraph");
             for line in lines {
-                // 3. Shaped maxima → line metrics. The paragraph's style sets
-                //    the line height as a floor; `at_least` grows the box when
-                //    an explicit run's ink would not fit.
-                let base = if para.font_size == px(28.) { 5 } else { 3 };
-                let metrics = grid.line_metrics_at_least(line.ascent(), line.descent(), base);
+                // 3. Shaped maxima → line metrics, in the style's covering
+                //    row budget. Because the budget already holds every face
+                //    these runs can use, there is nothing left for
+                //    `line_metrics_at_least` to grow: the height a
+                //    virtualizer assumed before shaping is the height this
+                //    line gets.
+                let metrics = grid.line_metrics(line.ascent(), line.descent(), para.line_rhythms);
                 let block = RhythmBlockMetrics::new(metrics, para.top, para.bottom);
                 let visual_lines = line.wrap_boundaries.len() as u32 + 1;
                 // Exact integer rows, never accumulated f32 heights. A

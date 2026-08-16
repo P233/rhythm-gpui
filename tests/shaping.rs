@@ -27,7 +27,7 @@ mod suite {
         font, px, size, App, AppContext, Application, Bounds, Context, Font, FontStyle, FontWeight,
         IntoElement, Render, TextRun, Window, WindowBounds, WindowOptions, WrappedLine,
     };
-    use rhythm_gpui::{RhythmGrid, RhythmLineMetrics};
+    use rhythm_gpui::{RhythmFontSpec, RhythmGrid, RhythmLineMetrics};
 
     const FONT_SIZE: f32 = 16.0;
     const TOLERANCE: f32 = 0.02;
@@ -262,6 +262,96 @@ mod suite {
         assert!(!fit.overflows_line_box(), "min_line_rhythms must fit");
     }
 
+    /// Group 5: a line height resolved to cover a known set of faces holds
+    /// every mixture those faces really shape to. The count is fixed before
+    /// anything is shaped — the property `min_line_rhythms` can only check
+    /// after the fact.
+    fn covering_budget(window: &Window) {
+        let grid = RhythmGrid::new(px(8.));
+        let serif = font("Noto Serif");
+        let mut bold = font("Noto Serif");
+        bold.weight = FontWeight::BOLD;
+        let mono = font("Noto Sans Mono");
+        let emoji = font("Apple Color Emoji");
+        let tall = font("Zapfino");
+
+        let spec = |face: &Font| RhythmFontSpec::new(face.clone(), px(FONT_SIZE), 3, grid);
+        let body = spec(&serif).resolve_covering(
+            window.text_system(),
+            &[spec(&bold), spec(&mono), spec(&emoji), spec(&tall)],
+        );
+        let budget = body.metrics().line_rhythms();
+
+        // Zapfino's ~1.8em ascent does not fit the three 8px rows the style
+        // asked for, so the covering height really did grow past the request.
+        assert!(
+            budget > 3,
+            "a face taller than the requested line box must raise the budget, got {budget}"
+        );
+        // Covering never inflates a set that already fits: without the
+        // display face, the style keeps the three rows it asked for.
+        let fitting = spec(&serif)
+            .resolve_covering(window.text_system(), &[spec(&bold), spec(&mono)])
+            .metrics()
+            .line_rhythms();
+        assert_eq!(fitting, 3, "a set that fits must keep the requested height");
+
+        // A gpui shaped line has one font size and one rhythm grid. Reject an
+        // incompatible catalog before resolving any of its fonts, rather than
+        // measuring a face at a size the line will never use.
+        let wrong_size = RhythmFontSpec::new(bold.clone(), px(FONT_SIZE / 2.0), 3, grid);
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            spec(&serif).resolve_covering(window.text_system(), &[wrong_size]);
+        }))
+        .is_err());
+        let wrong_grid =
+            RhythmFontSpec::new(bold.clone(), px(FONT_SIZE), 3, RhythmGrid::new(px(10.0)));
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            spec(&serif).resolve_covering(window.text_system(), &[wrong_grid]);
+        }))
+        .is_err());
+
+        // Only the height grew: single-style lines still place from the
+        // primary face's own metrics.
+        let plain = grid.font(window.text_system(), serif.clone(), px(FONT_SIZE), budget);
+        assert_close(
+            body.line_metrics().baseline_above(),
+            plain.line_metrics().baseline_above(),
+            "covering keeps the primary baseline",
+        );
+        // And it stays a reproducible cache identity: the spec carries the
+        // covering count and resolves back to the same metrics.
+        let spec_back = body.spec().expect("resolved through the text system");
+        assert_eq!(spec_back.line_rhythms(), budget);
+        assert_eq!(
+            spec_back.resolve(window.text_system()).metrics(),
+            body.metrics()
+        );
+
+        // Every real mixture of the covered faces fits that one budget, so a
+        // renderer can size blocks from line counts before shaping.
+        let cases: [Vec<(&str, &Font)>; 4] = [
+            vec![("plain body text", &serif)],
+            vec![("body ", &serif), ("bold ", &bold), ("mono()", &mono)],
+            vec![("hi ", &serif), ("😀", &emoji)],
+            vec![("plain ", &serif), ("flourish", &tall)],
+        ];
+        for parts in cases {
+            let line = shape(window, &parts);
+            let metrics = grid.line_metrics(line.ascent(), line.descent(), budget);
+            assert!(
+                !metrics.overflows_line_box(),
+                "covered mixture overflowed the budget of {budget} rows"
+            );
+            // Nothing left for `at_least` to grow: the budget is the height.
+            assert_eq!(
+                grid.line_metrics_at_least(line.ascent(), line.descent(), budget),
+                metrics
+            );
+            assert_paint_formula(&metrics);
+        }
+    }
+
     pub fn run() {
         let dir = fonts_dir();
         if !dir.join("NotoSerif-Regular.ttf").exists() {
@@ -302,13 +392,17 @@ mod suite {
                     mixed_explicit_runs(window);
                     glyph_fallback(window);
                     overflow(window);
+                    covering_budget(window);
                     cx.new(|_| TestView)
                 },
             )
             .expect("open the shaping test window");
             // On macOS quit terminates the process without returning from
             // `run`, so report success before it.
-            println!("shaping suite passed: single-run, mixed-run max, glyph fallback, overflow");
+            println!(
+                "shaping suite passed: single-run, mixed-run max, glyph fallback, \
+                 overflow, covering budget"
+            );
             cx.quit();
         });
     }

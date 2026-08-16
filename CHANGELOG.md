@@ -61,14 +61,27 @@ advice:
 - `RhythmLineMetrics::at_least` and `RhythmGrid::line_metrics_at_least`: build
   a line whose configured height is a floor, growing the box to
   `min_line_rhythms` in one step instead of constructing the metrics twice.
+- `RhythmLineMetrics::covering` (with `RhythmGrid::line_metrics_covering` and
+  `RhythmFontSpec::resolve_covering`): fix a style's line height over the
+  whole same-size, same-grid set of faces its lines can draw on — its own, its
+  run faces, and the families gpui would resolve to if one were missing —
+  instead of per shaped line. Since a line shapes to the maxima over its runs,
+  no mixture of a covered set can overflow the covering box, so "the line box
+  contains the ink" becomes a property of construction. Nothing is shaped to
+  compute it: the row budget is a startup constant, which is what lets a
+  virtualized renderer derive a block's height from its line count alone.
+  `resolve_covering` grows only the line height — metrics, cap height, and
+  baselines stay the primary face's, and the returned font's `spec()` still
+  reproduces it.
 - `Pixels`-typed `_px` mirrors on both metric types under the `gpui` feature
   (`line_height_px`, `baseline_above_px`, `paint_origin_for_px`, the block
   baselines/openings/heights, …), so the paint path keeps the type end to end
   instead of unwrapping with `f32::from` and rewrapping with `px`.
 - Glyph-level fallback still needs no special handling: substituted glyphs
   never enter a line's shaped ascent (CoreText-verified).
-- `direct_paint` example: resolve a font set once, shape and cache
-  `WrappedLine`s, place them with the metrics types, and paint directly.
+- `direct_paint` example: resolve a font set once — the body style covering
+  its run faces — shape and cache `WrappedLine`s, place them with the metrics
+  types at that fixed row budget, and paint directly.
 
 Resolved-font lifecycle, now a documented contract — within the crate, only
 the resolution factories touch the `TextSystem`; the `Rhythm`, `FontRhythm`,
@@ -94,12 +107,22 @@ Verification and fixes:
   with an OpenType descent-sign guard, mixed-run maxima, glyph-fallback
   non-inflation, and overflow behavior, using bundled OFL Noto fonts
   (`tests/fonts/`, excluded from the published package — the suite
-  self-skips without them). Found upstream: `TextSystem::baseline_offset`
+  self-skips without them), plus a covering-budget group: a line height
+  resolved over a face set really does hold every mixture those faces shape
+  to, with nothing left for `at_least` to grow. Found upstream:
+  `TextSystem::baseline_offset`
   disagrees with the paint path by one descent on macOS (raw negative
   descent vs shaped positive), so the paint equation is the oracle instead.
 - `rhythm_overlay` now paints only the rows intersecting the visible region
   (content mask), keeping the stripe phase anchored to the container — debug
   overlays on very tall documents cost `O(viewport)`, not `O(document)`.
+- `rhythm_overlay` returns a named `RhythmOverlay` element carrying
+  `.phase(offset)`: the stripe pattern anchors that far above the element's
+  top edge, for renderers that scroll by painting content at a computed
+  offset instead of moving a scroll container — the translated wrapper that
+  job used to need is gone. Stripes are clipped to the overlay's own bounds,
+  so a phase-lifted first row (and an overhanging last one) no longer depend
+  on an ancestor's `overflow_hidden`.
 - Platform scope: mixed-run and glyph-fallback semantics are verified on
   macOS/CoreText only; other gpui text backends are not assumed identical.
 

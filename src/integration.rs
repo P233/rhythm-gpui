@@ -2,8 +2,8 @@
 //! spacing, drop caps, the `RhythmStyled` extension, and the debug overlay.
 
 use gpui::{
-    canvas, fill, point, px, rgba, size, Bounds, Font, FontId, Hsla, IntoElement, ParentElement,
-    Pixels, Styled, TextSystem,
+    canvas, fill, point, px, rgba, size, App, Bounds, Font, FontId, Hsla, IntoElement,
+    ParentElement, Pixels, RenderOnce, Styled, TextSystem, Window,
 };
 
 use crate::{FontRhythm, Rhythm, RhythmBlockMetrics, RhythmLineMetrics};
@@ -111,6 +111,17 @@ impl RhythmGrid {
         line_rhythms: u32,
     ) -> RhythmLineMetrics {
         RhythmLineMetrics::at_least(ascent.into(), descent.into(), line_rhythms, self.core())
+    }
+
+    /// The smallest line box on this grid containing every line in
+    /// `metrics` — [`RhythmLineMetrics::covering`] with the grid slot filled
+    /// in; see it for what the covering count is for.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `metrics` is empty or an entry was built on another grid.
+    pub fn line_metrics_covering(&self, metrics: &[RhythmLineMetrics]) -> RhythmLineMetrics {
+        RhythmLineMetrics::covering(metrics, self.core())
     }
 
     /// Resolve a font bound to this grid — [`RhythmFont::resolve`] with the
@@ -693,6 +704,89 @@ impl RhythmFontSpec {
             self.grid(),
         )
     }
+
+    /// Resolve this spec at a line height that also contains every font in
+    /// `others` — the catalog-build step that makes "the line box holds the
+    /// ink" true by construction rather than per shaped line.
+    ///
+    /// A line shapes to the maxima over its explicit font runs, so a style
+    /// needs a line height covering the tallest mixture of every face its
+    /// lines can draw on: the run faces (bold, inline code, an explicit CJK
+    /// or emoji face) and the families gpui would resolve to if one were
+    /// missing. gpui shapes all `TextRun`s in a line at one font size, so
+    /// every spec must use this spec's `font_size` and grid. Compatibility is
+    /// checked before any font is resolved, then the resolved metrics are
+    /// folded with [`RhythmLineMetrics::covering`]. The result is *this*
+    /// spec's font at the covering count — metrics, cap height, and baselines
+    /// stay the primary face's, only the line height grows. Nothing is shaped,
+    /// so the count is a startup constant and every block's height follows
+    /// from its line count, which is what a virtualized renderer needs.
+    ///
+    /// Keep placing each shaped line with its own `ascent`/`descent` at this
+    /// font's [`line_rhythms`](FontRhythm::line_rhythms); with the height
+    /// settled here, [`RhythmLineMetrics::at_least`] has nothing left to
+    /// grow. Resolve the run faces at that same count when their own metrics
+    /// are used for placement — [`spec`](RhythmFont::spec) on the returned
+    /// font carries it, and reproduces these metrics as usual.
+    ///
+    /// ```no_run
+    /// use gpui::{font, px, FontWeight, TextSystem};
+    /// use rhythm_gpui::{RhythmFontSpec, RhythmGrid};
+    ///
+    /// fn body(text_system: &TextSystem) -> rhythm_gpui::RhythmFont {
+    ///     let grid = RhythmGrid::new(px(8.));
+    ///     let mut bold = font("Georgia");
+    ///     bold.weight = FontWeight::BOLD;
+    ///     RhythmFontSpec::new(font("Georgia"), px(16.), 3, grid).resolve_covering(
+    ///         text_system,
+    ///         &[
+    ///             RhythmFontSpec::new(bold, px(16.), 3, grid),
+    ///             RhythmFontSpec::new(font("Menlo"), px(16.), 3, grid),
+    ///             RhythmFontSpec::new(font("Apple Color Emoji"), px(16.), 3, grid),
+    ///         ],
+    ///     )
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics when a spec in `others` was built with a different font size or
+    /// grid size.
+    pub fn resolve_covering(
+        &self,
+        text_system: &TextSystem,
+        others: &[RhythmFontSpec],
+    ) -> RhythmFont {
+        for spec in others {
+            assert_eq!(
+                spec.grid_size, self.grid_size,
+                "every covering font spec must use the primary grid size"
+            );
+            assert_eq!(
+                spec.font_size, self.font_size,
+                "every covering font spec must use the primary font size"
+            );
+        }
+
+        let primary = self.resolve(text_system);
+        let mut covered = Vec::with_capacity(others.len() + 1);
+        covered.push(primary.line_metrics());
+        covered.extend(
+            others
+                .iter()
+                .map(|spec| spec.resolve(text_system).line_metrics()),
+        );
+        let line_rhythms = RhythmLineMetrics::covering(&covered, self.grid().core()).line_rhythms();
+
+        if line_rhythms == self.line_rhythms {
+            return primary;
+        }
+        Self {
+            line_rhythms,
+            ..self.clone()
+        }
+        .resolve(text_system)
+    }
 }
 
 /// A drop cap bound to the grid: the cap face at the size solved by
@@ -854,56 +948,127 @@ pub trait RhythmStyled: Styled + Sized {
 
 impl<T: Styled> RhythmStyled for T {}
 
-/// A `draw-rhythms` debug overlay: paints every other grid row in `color`.
+/// Create a [`RhythmOverlay`] painting every other grid row in `color` — the
+/// rhythm-sass `draw-rhythms()` mixin. Add [`RhythmOverlay::phase`] for a
+/// renderer that scrolls by painting at an offset.
+pub fn rhythm_overlay(grid: RhythmGrid, color: impl Into<Hsla>) -> RhythmOverlay {
+    RhythmOverlay {
+        grid,
+        color: color.into(),
+        phase: px(0.),
+    }
+}
+
+/// A `draw-rhythms` debug overlay: every other grid row in one color.
 /// Place it as the last child of the container it should cover; it fills that
 /// container and ignores mouse events. An ordinary gpui container already uses
 /// relative positioning by default, so no extra `.relative()` call is needed,
-/// and this helper does not alter the container's position style. Equivalent to
-/// the rhythm-sass `draw-rhythms()` mixin.
+/// and this element does not alter the container's position style.
 ///
-/// If the content scrolls, put the overlay *inside* the scrolled wrapper so
-/// the grid moves with the text. Only rows intersecting the visible region
-/// (the current content mask) are painted, so covering a document far taller
-/// than the viewport costs `O(viewport height / grid size)` per frame; the
-/// stripe phase stays anchored to the container's top edge.
-pub fn rhythm_overlay(grid: RhythmGrid, color: impl Into<Hsla>) -> impl IntoElement {
-    let color = color.into();
-    canvas(
-        |_, _, _| (),
-        move |bounds, _, window, _| {
-            let visible = bounds.intersect(&window.content_mask().bounds);
-            if visible.size.height <= px(0.) || visible.size.width <= px(0.) {
-                return;
-            }
-            let step = grid.size() * 2.;
-            let first = first_visible_stripe(
-                bounds.origin.y.into(),
-                visible.origin.y.into(),
-                grid.size().into(),
-                step.into(),
-            );
-            let mut y = bounds.origin.y + step * first;
-            while y < visible.bottom() {
-                window.paint_quad(fill(
-                    Bounds::new(
-                        point(bounds.origin.x, y),
-                        size(bounds.size.width, grid.size()),
-                    ),
-                    color,
-                ));
-                y += step;
-            }
-        },
-    )
-    .absolute()
-    .inset_0()
+/// The stripes start at the container's top edge, or [`phase`](Self::phase)
+/// above it. If the content scrolls a container, put the overlay *inside* the
+/// scrolled wrapper so the grid moves with the text; a renderer that scrolls
+/// by painting content at a computed offset instead sets that offset as the
+/// phase. Either way only rows intersecting the visible region (the current
+/// content mask) are painted, and each is clipped to the overlay's own
+/// bounds, so covering a document far taller than the viewport costs
+/// `O(viewport height / grid size)` per frame and never paints outside the
+/// container it covers.
+#[derive(IntoElement)]
+pub struct RhythmOverlay {
+    grid: RhythmGrid,
+    color: Hsla,
+    phase: Pixels,
 }
 
-/// Index of the first stripe that can intersect a viewport starting at
-/// `visible_top`, for stripes `stripe_height` tall spaced `step` apart from
-/// `origin_y` — the phase-preserving skip count for the overlay.
-fn first_visible_stripe(origin_y: f32, visible_top: f32, stripe_height: f32, step: f32) -> f32 {
-    (((visible_top - origin_y - stripe_height) / step).ceil()).max(0.0)
+impl RhythmOverlay {
+    /// Anchor the stripes `offset` above the element's top edge, for
+    /// renderers that scroll by painting content at an offset instead of
+    /// moving a scroll container: pass the offset the content was painted
+    /// with and the grid stays glued to the document.
+    ///
+    /// Equivalent to translating the overlay up by `offset` — without the
+    /// wrapper element, and without an ancestor to clip it, since stripes
+    /// are clipped to the overlay's own bounds.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `offset` is not finite.
+    pub fn phase(mut self, offset: Pixels) -> Self {
+        assert!(
+            f32::from(offset).is_finite(),
+            "overlay phase must be finite"
+        );
+        self.phase = offset;
+        self
+    }
+}
+
+impl RenderOnce for RhythmOverlay {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let Self { grid, color, phase } = self;
+        canvas(
+            |_, _, _| (),
+            move |bounds, _, window, _| {
+                let visible = bounds.intersect(&window.content_mask().bounds);
+                if visible.size.height <= px(0.) || visible.size.width <= px(0.) {
+                    return;
+                }
+                // The grid's origin row, which the phase lifts above the
+                // element's own top edge.
+                let origin_y = f32::from(bounds.origin.y) - f32::from(phase);
+                visible_stripes(
+                    origin_y,
+                    f32::from(grid.size()),
+                    f32::from(visible.origin.y),
+                    f32::from(visible.bottom()),
+                    |from, to| {
+                        window.paint_quad(fill(
+                            Bounds::new(
+                                point(bounds.origin.x, px(from)),
+                                size(bounds.size.width, px(to - from)),
+                            ),
+                            color,
+                        ));
+                    },
+                );
+            },
+        )
+        .absolute()
+        .inset_0()
+    }
+}
+
+/// The overlay's whole geometry: every other row of the grid rooted at
+/// `origin_y` — which a phase can lift above the element — reported to
+/// `paint` as `(from, to)` spans clipped to the visible `[top, bottom)`.
+///
+/// Whole periods before the visible region are skipped arithmetically rather
+/// than walked, so an overlay over a document far taller than the viewport
+/// still costs `O(viewport height / stripe height)`, and the clipping keeps
+/// a phase-lifted first row (or an overhanging last one) inside the element.
+fn visible_stripes(
+    origin_y: f32,
+    stripe_height: f32,
+    top: f32,
+    bottom: f32,
+    mut paint: impl FnMut(f32, f32),
+) {
+    let step = stripe_height * 2.0;
+    let skipped = (((top - origin_y - stripe_height) / step).ceil()).max(0.0);
+    let mut y = origin_y + step * skipped;
+    while y < bottom {
+        let from = y.max(top);
+        let to = (y + stripe_height).min(bottom);
+        if to > from {
+            paint(from, to);
+        }
+        let next = y + step;
+        if !next.is_finite() || next <= y {
+            break;
+        }
+        y = next;
+    }
 }
 
 #[cfg(test)]
@@ -1153,19 +1318,91 @@ mod tests {
         let _ = RhythmGrid::new(px(0.0));
     }
 
+    /// The overlay's painted spans for an 8px grid rooted at `origin_y`,
+    /// over the visible region `[top, bottom)`.
+    fn stripe_spans(origin_y: f32, top: f32, bottom: f32) -> Vec<(f32, f32)> {
+        let mut spans = Vec::new();
+        visible_stripes(origin_y, 8.0, top, bottom, |from, to| {
+            spans.push((from, to))
+        });
+        spans
+    }
+
     #[test]
-    fn overlay_skips_to_the_first_visible_stripe_without_losing_phase() {
-        // Nothing scrolled away: start at the container's top edge.
-        assert_eq!(first_visible_stripe(0.0, 0.0, 8.0, 16.0), 0.0);
-        // A stripe still partially visible at the top edge is kept…
-        assert_eq!(first_visible_stripe(0.0, 1607.0, 8.0, 16.0), 100.0);
-        // …and dropped once it has fully scrolled past.
-        assert_eq!(first_visible_stripe(0.0, 1609.0, 8.0, 16.0), 101.0);
-        // The mask can never start above the canvas bounds, but the clamp
-        // keeps the phase anchored even for a degenerate input.
-        assert_eq!(first_visible_stripe(100.0, 0.0, 8.0, 16.0), 0.0);
-        // The phase follows the container's own origin.
-        assert_eq!(first_visible_stripe(4.0, 1611.0, 8.0, 16.0), 100.0);
+    fn overlay_stripes_every_other_row_from_the_container_top() {
+        assert_eq!(
+            stripe_spans(0.0, 0.0, 40.0),
+            [(0.0, 8.0), (16.0, 24.0), (32.0, 40.0)]
+        );
+        // The last row is clipped to the element instead of bleeding past it.
+        assert_eq!(
+            stripe_spans(0.0, 0.0, 36.0),
+            [(0.0, 8.0), (16.0, 24.0), (32.0, 36.0)]
+        );
+    }
+
+    #[test]
+    fn overlay_walks_only_the_visible_region_and_keeps_the_phase() {
+        // A row still partially visible at the mask's top edge is kept and
+        // clipped to it; a whole 1600px of scrolled-past rows costs no work.
+        assert_eq!(
+            stripe_spans(0.0, 1607.0, 1630.0),
+            [(1607.0, 1608.0), (1616.0, 1624.0)]
+        );
+        // One pixel later that row is gone, and the phase still holds.
+        assert_eq!(stripe_spans(0.0, 1609.0, 1630.0), [(1616.0, 1624.0)]);
+    }
+
+    #[test]
+    fn overlay_phase_shifts_the_pattern_up_and_clips_the_lifted_row() {
+        // A phase of one rhythm unit lifts the grid origin to −8: the row
+        // that would open the element is gone and the pattern moves up.
+        assert_eq!(stripe_spans(-8.0, 0.0, 40.0), [(8.0, 16.0), (24.0, 32.0)]);
+        // Half a unit leaves the visible half of the lifted row, painted from
+        // the element's top edge — no ancestor clipping needed.
+        assert_eq!(
+            stripe_spans(-4.0, 0.0, 40.0),
+            [(0.0, 4.0), (12.0, 20.0), (28.0, 36.0)]
+        );
+        // Deep into a scrolled document the phase is still exact, and only
+        // the visible period is walked.
+        assert_eq!(stripe_spans(-1600.0, 0.0, 24.0), [(0.0, 8.0), (16.0, 24.0)]);
+    }
+
+    #[test]
+    fn overlay_stops_when_a_stride_is_below_coordinate_precision() {
+        // Both values are valid f32 coordinates, but adding this period at
+        // y=100 rounds back to 100. The paint loop must stop instead of
+        // waiting forever for a representable next stripe.
+        assert_eq!(100.0f32 + 2.0e-7, 100.0);
+        let mut spans = Vec::new();
+        visible_stripes(0.0, 1.0e-7, 100.0, 101.0, |from, to| spans.push((from, to)));
+        assert!(spans.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "overlay phase must be finite")]
+    fn overlay_rejects_a_non_finite_phase() {
+        let _ = rhythm_overlay(RhythmGrid::new(px(8.0)), rgba(0xff78783f)).phase(px(f32::NAN));
+    }
+
+    #[test]
+    fn covering_line_metrics_mirror_the_math_layer() {
+        let grid = RhythmGrid::new(px(8.0));
+        let body = grid.line_metrics(px(14.67), px(3.51), 3);
+        let display = grid.line_metrics(px(28.8), px(6.4), 3);
+        let covering = grid.line_metrics_covering(&[body, display]);
+
+        assert_eq!(
+            covering,
+            RhythmLineMetrics::covering(&[body, display], Rhythm::new(8.0))
+        );
+        // Three rows cannot hold the display face's ink; five can, and every
+        // mixture of the pair fits that count.
+        assert_eq!(covering.line_rhythms(), 5);
+        assert!(!grid
+            .line_metrics(px(28.8), px(6.4), covering.line_rhythms())
+            .overflows_line_box());
     }
 
     #[test]

@@ -137,7 +137,9 @@ The demo doubles as a recipe collection:
 - **Debug overlay** — chain `.rhythm_debug_overlay(grid, show)` on the page
   container to toggle the stripes while developing; every other grid row is
   painted so you can verify baselines land on them. The underlying
-  `rhythm_overlay(grid, color)` element takes a custom color.
+  `rhythm_overlay(grid, color)` element takes a custom color, and
+  `.phase(offset)` re-anchors the stripes for renderers that scroll by
+  painting content at a computed offset instead of moving a scroll container.
 - **Device-pixel snapping** — the functions are exact to float precision
   (no whole-pixel rounding, unlike the Sass version); use `snap` to round a
   final value to whole device pixels. gpui rounds text line heights to whole
@@ -161,6 +163,17 @@ inline code, CJK, or emoji faces actually shape — lay blocks out with
 fragment heights that keep the rhythm phase across virtualized splits), and
 place every baseline with `paint_origin_for(target)`. Glyph fallback needs no
 special handling: substituted glyphs never grow the line box.
+
+Settle the row budget at catalog-build time. A style's lines can draw on more
+faces than its own — bold, inline code, an explicit CJK or emoji face, or
+whatever gpui resolves to when a family is missing — and each line shapes to
+the maxima over its runs. `RhythmFontSpec::resolve_covering(ts, &others)`
+resolves the style's font at a line height that holds any mixture of that
+same-size, same-grid set (`RhythmLineMetrics::covering` is the pure form), so
+"the line box contains the ink" is true by construction instead of checked
+per shaped line. Nothing is shaped to compute it, which is what makes a
+block's height a function of its line count — the property virtualization
+needs.
 
 Two conveniences for that path: `first_rows` / `middle_rows` / `last_rows` are
 ordered integer cursor transitions that partition `rows(lines)` across a split

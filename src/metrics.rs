@@ -11,8 +11,10 @@
 //! anchors into whole-row block geometry, including the fragment heights a
 //! virtualized renderer needs.
 //!
-//! Everything here is a small `Copy` value: construction and every method are
-//! O(1), allocation-free, and lock-free, and nothing touches a text system.
+//! Everything here is a small `Copy` value. Construction and scalar geometry
+//! methods are O(1); [`RhythmLineMetrics::covering`] is O(`metrics.len()`). All
+//! of them are allocation-free and lock-free, and nothing touches a text
+//! system.
 
 use crate::Rhythm;
 
@@ -32,7 +34,9 @@ use crate::Rhythm;
 /// [`overflows_line_box`](Self::overflows_line_box) reports when the chosen
 /// count is smaller. Keeping a smaller count is valid — the baseline stays on
 /// the grid and the ink overflows symmetrically via negative half-leading,
-/// exactly as CSS line boxes behave.
+/// exactly as CSS line boxes behave. [`covering`](Self::covering) picks the
+/// count the other way round: over a known set of faces, before anything is
+/// shaped.
 ///
 /// A shaped *empty* line has zero ascent and descent; place empty lines with
 /// the style's [`FontRhythm`](crate::FontRhythm) metrics instead so blank
@@ -105,6 +109,74 @@ impl RhythmLineMetrics {
             line_rhythms: line_rhythms.max(line.min_line_rhythms()),
             ..line
         }
+    }
+
+    /// The smallest line box on `grid` containing every line in `metrics`:
+    /// the maximum ascent and the maximum descent over the set, in the
+    /// largest of their line heights, grown to
+    /// [`min_line_rhythms`](Self::min_line_rhythms) when that combined ink no
+    /// longer fits.
+    ///
+    /// A line shapes to the maxima over its explicit font runs, so no line
+    /// drawn from a known set of faces can exceed the box covering that set.
+    /// Folding a style's whole set — its own face, the faces its runs use
+    /// (bold, inline code, an explicit CJK or emoji face), and the families
+    /// gpui would resolve to if one were missing — at catalog-build time
+    /// makes "the line box contains the ink" a property of construction
+    /// rather than one each shaped line has to be checked for. Nothing here
+    /// shapes text: the count is known at startup, so a block's height
+    /// follows from its line count alone, which is what a virtualized
+    /// renderer needs.
+    ///
+    /// Take the count, not the box, into placement: this value's
+    /// `ascent`/`descent` describe a hypothetical line reaching both maxima
+    /// at once, so keep building each line's metrics from its own shaped
+    /// values — at this [`line_rhythms`](Self::line_rhythms) — and every
+    /// baseline still lands on the grid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rhythm_gpui::{Rhythm, RhythmLineMetrics};
+    ///
+    /// let grid = Rhythm::new(8.0);
+    /// // A body style, and a display face its lines can mix in.
+    /// let body = RhythmLineMetrics::new(14.67, 3.51, 3, grid);
+    /// let display = RhythmLineMetrics::new(28.8, 6.4, 3, grid);
+    ///
+    /// // One static row budget for the style: three rows cannot hold the
+    /// // display face's ink, so the covering box is five.
+    /// let budget = RhythmLineMetrics::covering(&[body, display], grid);
+    /// assert_eq!(budget.line_rhythms(), 5);
+    ///
+    /// // Every mixture of the two fits it, including the worst case.
+    /// let worst = RhythmLineMetrics::new(28.8, 6.4, budget.line_rhythms(), grid);
+    /// assert!(!worst.overflows_line_box());
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics when `metrics` is empty, when an entry was built on a
+    /// different grid, or when the minimum fitting count does not fit in
+    /// `u32`.
+    pub fn covering(metrics: &[RhythmLineMetrics], grid: Rhythm) -> Self {
+        assert!(
+            !metrics.is_empty(),
+            "a covering line box must cover at least one line"
+        );
+        let mut ascent = 0.0;
+        let mut descent = 0.0;
+        let mut line_rhythms = 1;
+        for line in metrics {
+            assert_eq!(
+                line.grid, grid,
+                "every covered line must be built on the covering grid"
+            );
+            ascent = f32::max(ascent, line.ascent);
+            descent = f32::max(descent, line.descent);
+            line_rhythms = line_rhythms.max(line.line_rhythms);
+        }
+        Self::at_least(ascent, descent, line_rhythms, grid)
     }
 
     /// The shaped ascent above the baseline, non-negative.
@@ -788,6 +860,62 @@ mod tests {
             RhythmLineMetrics::at_least(line.ascent(), line.descent(), 3, GRID),
             line
         );
+    }
+
+    #[test]
+    fn covering_fits_every_mixture_of_the_set_it_covers() {
+        // A body style plus the faces its runs can pull in: a monospace with
+        // a deeper descent and a display face with a far taller ascent.
+        let body = georgia_line();
+        let mono = RhythmLineMetrics::new(15.0, 6.0, 3, GRID);
+        let display = RhythmLineMetrics::new(28.8, 4.0, 3, GRID);
+        let covering = RhythmLineMetrics::covering(&[body, mono, display], GRID);
+
+        // Maxima, not any single member's pair: the worst case is a line
+        // mixing the display ascent with the monospace descent.
+        assert_eq!(covering.ascent(), 28.8);
+        assert_eq!(covering.descent(), 6.0);
+        assert_eq!(covering.line_rhythms(), 5); // 34.8px of ink needs 5 rows
+        assert!(!covering.overflows_line_box());
+
+        // The point of the fold: at that count no mixture overflows, so the
+        // count is a static row budget and `at_least` has nothing to grow.
+        for ascent in [body.ascent(), mono.ascent(), display.ascent()] {
+            for descent in [body.descent(), mono.descent(), display.descent()] {
+                let line = RhythmLineMetrics::new(ascent, descent, covering.line_rhythms(), GRID);
+                assert!(!line.overflows_line_box(), "{ascent} / {descent} overflows");
+                assert_eq!(
+                    RhythmLineMetrics::at_least(ascent, descent, covering.line_rhythms(), GRID),
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn covering_keeps_the_tallest_requested_line_height() {
+        // Ink that fits everywhere: the count comes from the members, not
+        // from the ink, and a single-member fold is the member itself.
+        let short = RhythmLineMetrics::new(14.67, 3.51, 3, GRID);
+        let tall = RhythmLineMetrics::new(10.0, 3.0, 5, GRID);
+        assert_eq!(
+            RhythmLineMetrics::covering(&[short, tall], GRID).line_rhythms(),
+            5
+        );
+        assert_eq!(RhythmLineMetrics::covering(&[short], GRID), short);
+    }
+
+    #[test]
+    #[should_panic(expected = "must cover at least one line")]
+    fn covering_rejects_an_empty_set() {
+        let _ = RhythmLineMetrics::covering(&[], GRID);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be built on the covering grid")]
+    fn covering_rejects_a_line_from_another_grid() {
+        let other = RhythmLineMetrics::new(14.67, 3.51, 3, Rhythm::new(10.0));
+        let _ = RhythmLineMetrics::covering(&[georgia_line(), other], GRID);
     }
 
     #[test]

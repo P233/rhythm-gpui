@@ -60,11 +60,19 @@
 //! paint path never converts by hand. The `direct_paint` example is the
 //! complete recipe.
 //!
+//! Settle each style's line height at catalog-build time with
+//! [`RhythmLineMetrics::covering`] — or `RhythmFontSpec::resolve_covering`,
+//! which resolves a font at the count covering its whole same-size run set.
+//! Because no mixture of those faces can shape past the covering box, the row
+//! budget is known before anything is shaped, and a block's height follows
+//! from its line count alone: the property virtualization is built on.
+//!
 //! # Performance contract
 //!
 //! - [`Rhythm`], [`FontRhythm`], and line/block geometry are small `Copy`
-//!   values. Their pure geometry and spacing methods are O(1),
-//!   allocation-free, and lock-free (enforced by a counting-allocator test),
+//!   values. Their scalar geometry and spacing methods are O(1), while
+//!   [`RhythmLineMetrics::covering`] is O(`metrics.len()`). All remain
+//!   allocation-free and lock-free (enforced by a counting-allocator test),
 //!   with hot methods `#[inline]` across the crate boundary.
 //! - gpui `TextSystem` access is confined to font/spec/drop-cap resolution
 //!   factories; geometry and spacing on stored values never query it.
@@ -101,5 +109,6 @@ mod integration;
 pub use frame::{rhythm_frame, RhythmFrame};
 #[cfg(feature = "gpui")]
 pub use integration::{
-    rhythm_overlay, RhythmDropCap, RhythmFont, RhythmFontSpec, RhythmGrid, RhythmStyled,
+    rhythm_overlay, RhythmDropCap, RhythmFont, RhythmFontSpec, RhythmGrid, RhythmOverlay,
+    RhythmStyled,
 };
