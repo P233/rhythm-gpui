@@ -18,10 +18,12 @@ use std::time::Duration;
 
 use gpui::{
     div, font, img, prelude::*, px, rgb, size, App, Application, Bounds, ClickEvent, Context,
-    FontStyle, FontWeight, ObjectFit, Pixels, TextRun, TextSystem, Window, WindowBounds,
-    WindowOptions,
+    FocusHandle, FontStyle, FontWeight, KeyBinding, ObjectFit, Pixels, TextRun, TextSystem, Window,
+    WindowBounds, WindowOptions,
 };
 use rhythm_gpui::{rhythm_frame, RhythmDropCap, RhythmFont, RhythmGrid, RhythmStyled};
+
+gpui::actions!(rhythm_demo, [FocusNext, FocusPrevious]);
 
 #[derive(Clone, Copy, PartialEq)]
 enum Source {
@@ -66,6 +68,7 @@ const CHOICES: &[FontChoice] = &[
 ];
 
 const DROP_CAP_LETTER: &str = "W";
+const MAX_FONT_BYTES: usize = 20 * 1024 * 1024;
 const DROP_CAP_REST: &str = "hen William Morris founded the Kelmscott Press in 1891, he insisted \
 that a page of text should be judged as a whole: the proportions of the margins, the blackness \
 of the type, and above all the even rhythm of its lines. A page reads comfortably when the eye \
@@ -119,6 +122,7 @@ impl FontSet {
 }
 
 struct Demo {
+    focus_handle: FocusHandle,
     grid: RhythmGrid,
     selected: usize,
     set: FontSet,
@@ -201,6 +205,14 @@ impl Demo {
         cx.notify();
     }
 
+    fn focus_next(&mut self, _: &FocusNext, window: &mut Window, _: &mut Context<Self>) {
+        window.focus_next();
+    }
+
+    fn focus_previous(&mut self, _: &FocusPrevious, window: &mut Window, _: &mut Context<Self>) {
+        window.focus_prev();
+    }
+
     // Labels never change while loading (a text change would resize the button
     // and shift the row); progress is shown via opacity and the status line.
     fn font_button(&self, ix: usize, cx: &mut Context<Self>) -> impl IntoElement {
@@ -209,10 +221,12 @@ impl Demo {
         let is_loading = self.loading == Some(choice.family);
         div()
             .id(ix)
+            .tab_index(ix as isize + 1)
             .px_2()
             .py_0p5()
             .rounded_md()
             .cursor_pointer()
+            .focus(|s| s.shadow_md())
             .map(|d| {
                 if is_selected {
                     d.bg(rgb(0x24292f)).text_color(gpui::white())
@@ -277,6 +291,7 @@ impl Demo {
                     .child(
                         div()
                             .id("grid-toggle")
+                            .tab_index(CHOICES.len() as isize + 1)
                             .ml_2()
                             .w(px(72.))
                             .py_0p5()
@@ -284,6 +299,7 @@ impl Demo {
                             .cursor_pointer()
                             .border_1()
                             .border_color(rgb(0xd0d7de))
+                            .focus(|s| s.border_color(rgb(0x0969da)).shadow_sm())
                             .hover(|s| s.bg(rgb(0xe6e8eb)))
                             .flex()
                             .justify_center()
@@ -297,6 +313,7 @@ impl Demo {
                     .child(
                         div()
                             .id("anchor-toggle")
+                            .tab_index(CHOICES.len() as isize + 2)
                             .ml_2()
                             .w(px(124.))
                             .py_0p5()
@@ -304,6 +321,7 @@ impl Demo {
                             .cursor_pointer()
                             .border_1()
                             .border_color(rgb(0xd0d7de))
+                            .focus(|s| s.border_color(rgb(0x0969da)).shadow_sm())
                             .hover(|s| s.bg(rgb(0xe6e8eb)))
                             .flex()
                             .justify_center()
@@ -317,6 +335,7 @@ impl Demo {
                     .child(
                         div()
                             .id("media-toggle")
+                            .tab_index(CHOICES.len() as isize + 3)
                             .ml_2()
                             .w(px(96.))
                             .py_0p5()
@@ -324,6 +343,7 @@ impl Demo {
                             .cursor_pointer()
                             .border_1()
                             .border_color(rgb(0xd0d7de))
+                            .focus(|s| s.border_color(rgb(0x0969da)).shadow_sm())
                             .hover(|s| s.bg(rgb(0xe6e8eb)))
                             .flex()
                             .justify_center()
@@ -503,6 +523,10 @@ impl Render for Demo {
             ),
         };
         div()
+            .id("app")
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::focus_next))
+            .on_action(cx.listener(Self::focus_previous))
             .flex()
             .flex_col()
             .size_full()
@@ -584,25 +608,43 @@ fn fetch_google_family(family: &str) -> Result<Vec<Cow<'static, [u8]>>, String> 
 
     let mut fonts = Vec::new();
     for url in urls {
-        let mut bytes = Vec::new();
-        agent
+        let response = agent
             .get(&url)
             .call()
-            .map_err(|e| format!("failed to fetch font file: {e}"))?
-            .into_reader()
-            .take(20 * 1024 * 1024)
-            .read_to_end(&mut bytes)
-            .map_err(|e| format!("failed to read font file: {e}"))?;
-        fonts.push(Cow::Owned(bytes));
+            .map_err(|e| format!("failed to fetch font file: {e}"))?;
+        fonts.push(Cow::Owned(read_bounded(
+            response.into_reader(),
+            MAX_FONT_BYTES,
+        )?));
     }
     Ok(fonts)
+}
+
+fn read_bounded(reader: impl Read, max_bytes: usize) -> Result<Vec<u8>, String> {
+    let read_limit = u64::try_from(max_bytes)
+        .ok()
+        .and_then(|limit| limit.checked_add(1))
+        .ok_or_else(|| "font byte limit is too large".to_string())?;
+    let mut bytes = Vec::new();
+    reader
+        .take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("failed to read font file: {e}"))?;
+    if bytes.len() > max_bytes {
+        return Err(format!("font file exceeds the {max_bytes}-byte limit"));
+    }
+    Ok(bytes)
 }
 
 fn extract_ttf_urls(css: &str) -> Vec<String> {
     let mut urls = Vec::new();
     for chunk in css.split("url(").skip(1) {
         if let Some(end) = chunk.find(')') {
-            let url = chunk[..end].trim_matches(['\'', '"']).to_string();
+            let url = chunk[..end]
+                .trim()
+                .trim_matches(['\'', '"'])
+                .trim()
+                .to_string();
             if url.ends_with(".ttf") && !urls.contains(&url) {
                 urls.push(url);
             }
@@ -613,21 +655,16 @@ fn extract_ttf_urls(css: &str) -> Vec<String> {
 
 fn main() {
     Application::new().run(|cx: &mut App| {
+        cx.bind_keys([
+            KeyBinding::new("tab", FocusNext, None),
+            KeyBinding::new("shift-tab", FocusPrevious, None),
+        ]);
+
         let grid = RhythmGrid::new(px(8.));
         let text_system = cx.text_system();
-        let demo = Demo {
-            grid,
-            selected: 0,
-            set: FontSet::resolve(text_system, CHOICES[0].family, grid),
-            mono: grid.font(text_system, font("Menlo"), px(13.), 3),
-            cjk: grid.font(text_system, font("PingFang SC"), px(16.), 3),
-            loaded: HashSet::new(),
-            loading: None,
-            error: None,
-            show_grid: true,
-            cap_anchor: false,
-            crop_media: false,
-        };
+        let set = FontSet::resolve(text_system, CHOICES[0].family, grid);
+        let mono = grid.font(text_system, font("Menlo"), px(13.), 3);
+        let cjk = grid.font(text_system, font("PingFang SC"), px(16.), 3);
 
         let bounds = Bounds::centered(None, size(px(840.), px(720.)), cx);
         cx.open_window(
@@ -635,9 +672,66 @@ fn main() {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_, cx| cx.new(|_| demo),
+            |window, cx| {
+                cx.new(|cx| {
+                    let focus_handle = cx.focus_handle();
+                    window.focus(&focus_handle);
+                    Demo {
+                        focus_handle,
+                        grid,
+                        selected: 0,
+                        set,
+                        mono,
+                        cjk,
+                        loaded: HashSet::new(),
+                        loading: None,
+                        error: None,
+                        show_grid: true,
+                        cap_anchor: false,
+                        crop_media: false,
+                    }
+                })
+            },
         )
         .unwrap();
         cx.activate(true);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn css_parser_keeps_unique_ttf_urls_only() {
+        let css = r#"
+            src: url( 'https://fonts.gstatic.com/a.ttf' ) format('truetype');
+            src: url("https://fonts.gstatic.com/a.ttf") format('truetype');
+            src: url(https://fonts.gstatic.com/a.woff2) format('woff2');
+            src: url(https://fonts.gstatic.com/b.ttf) format('truetype');
+        "#;
+
+        assert_eq!(
+            extract_ttf_urls(css),
+            [
+                "https://fonts.gstatic.com/a.ttf".to_string(),
+                "https://fonts.gstatic.com/b.ttf".to_string(),
+            ]
+        );
+        assert!(extract_ttf_urls("").is_empty());
+    }
+
+    #[test]
+    fn bounded_reader_rejects_oversized_font_data() {
+        assert_eq!(
+            read_bounded(Cursor::new(b"abc"), 3).unwrap(),
+            b"abc".to_vec()
+        );
+        assert_eq!(
+            read_bounded(Cursor::new(b"abcd"), 3).unwrap_err(),
+            "font file exceeds the 3-byte limit"
+        );
+    }
 }

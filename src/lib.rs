@@ -78,10 +78,11 @@
 //! # Platform scope
 //!
 //! The math layer is renderer- and platform-agnostic, and the resolved-font
-//! path uses cross-platform gpui API. The mixed-run maximum and
-//! glyph-fallback behaviors are verified against macOS/CoreText by the
-//! `shaping` integration suite; other gpui text backends (DirectWrite,
-//! cosmic-text) are not yet verified and must not be assumed identical.
+//! path uses cross-platform gpui API. The default integration is compile-checked
+//! on Linux and Windows. The mixed-run maximum and glyph-fallback behaviors are
+//! verified against macOS/CoreText by the `shaping` integration suite; the
+//! DirectWrite and cosmic-text runtime behaviors are not yet verified and must
+//! not be assumed identical.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]

@@ -32,6 +32,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85
       - run: cargo check --no-default-features --lib
 
+  gpui-platforms:
+    name: GPUI compile (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux GPUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig-dev \
+            libglib2.0-dev \
+            libvulkan1 \
+            libwayland-dev \
+            libx11-xcb-dev \
+            libxkbcommon-x11-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --locked --lib
+
   full:
     name: Full (macOS, gpui)
     runs-on: macos-latest

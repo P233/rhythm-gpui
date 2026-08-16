@@ -272,12 +272,6 @@ impl RhythmBlockMetrics {
         px(self.first_baseline())
     }
 
-    /// [`continuation_baseline`](Self::continuation_baseline) in `Pixels`.
-    #[inline]
-    pub fn continuation_baseline_px(&self, row: i32) -> Pixels {
-        px(self.continuation_baseline(row))
-    }
-
     /// [`baseline_at_row`](Self::baseline_at_row) in `Pixels`.
     #[inline]
     pub fn baseline_at_row_px(&self, row: i64) -> Pixels {
@@ -1121,10 +1115,6 @@ mod tests {
         assert_eq!(block.opening_px(), px(block.opening()));
         assert_eq!(block.closing_px(), px(block.closing()));
         assert_eq!(block.first_baseline_px(), px(block.first_baseline()));
-        assert_eq!(
-            block.continuation_baseline_px(block.first_rows(2)),
-            px(block.continuation_baseline(block.first_rows(2)))
-        );
         let wide_row = i64::from(i32::MAX) * 4;
         assert_eq!(
             block.baseline_at_row_px(wide_row),

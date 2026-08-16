@@ -106,6 +106,9 @@ cargo run --example demo   # font picker, drop cap, heading anchor toggle,
                            # downloads Google Fonts on demand
 ```
 
+The toolbar follows a single Tab / Shift-Tab order; Enter or Space activates
+the focused font or toggle without a separate keyboard-only behavior path.
+
 The demo doubles as a recipe collection:
 
 - **Page scaffold** — open with `baseline_top`, chain blocks with
@@ -207,9 +210,10 @@ are allocation-free `Copy` math (a counting-allocator test enforces that exact
 scope). Key caller-owned resolution caches with `RhythmFontSpec`; the crate
 keeps no cache of its own. Register a family before its first resolution — gpui
 caches failed font requests, so clearing a caller cache after late registration
-cannot repair the miss in the same `TextSystem`. Mixed-run and glyph-fallback
-shaping semantics are CI-verified against macOS/CoreText (`tests/shaping.rs`);
-other gpui text backends are not yet verified.
+cannot repair the miss in the same `TextSystem`. The default gpui layer is
+compile-checked on Linux and Windows. Mixed-run and glyph-fallback shaping
+semantics are CI-verified against macOS/CoreText (`tests/shaping.rs`); the
+DirectWrite and cosmic-text runtime behaviors are not yet verified.
 
 **Tip:** as with rhythm-sass, make every text block occupy a whole number of
 rhythm units. Line heights are whole units by construction; close a

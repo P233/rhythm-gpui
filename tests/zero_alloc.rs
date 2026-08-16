@@ -67,7 +67,6 @@ fn hot_path_geometry_allocates_nothing() {
             + block.first_rows(2) as f32
             + block.middle_rows(4) as f32
             + block.last_rows(5) as f32
-            + block.continuation_baseline(block.first_rows(2))
             + block.baseline_at_row(i64::from(block.first_rows(2)))
             + cap_block.baseline_at_row(i64::from(cap_block.first_rows(2)))
             + grid.baseline_top(&font, 3)
@@ -92,7 +91,6 @@ fn hot_path_geometry_allocates_nothing() {
                 + f32::from(block.opening_px())
                 + f32::from(block.closing_px())
                 + f32::from(block.first_baseline_px())
-                + f32::from(block.continuation_baseline_px(block.first_rows(2)))
                 + f32::from(block.height_px(7))
                 + f32::from(block.first_height_px(2))
                 + f32::from(block.middle_height_px(4))

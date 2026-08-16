@@ -47,6 +47,7 @@ ureq = "2"
 [[example]]
 name = "demo"
 required-features = ["gpui"]
+test = true
 
 [[example]]
 name = "direct_paint"

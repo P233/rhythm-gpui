@@ -37,6 +37,9 @@ embeds) no longer knocks everything after it off the grid:
   measured sizer leaf, so the box reserves its height before an image loads —
   no layout shift.
 - Demo: a fluid-width image with a pad/crop toolbar toggle.
+- Demo toolbar controls now participate in one Tab / Shift-Tab order and reuse
+  their click handlers for Enter/Space activation. Font downloads reject an
+  oversized response explicitly instead of registering truncated bytes.
 
 Shaped-line placement — a line mixing explicit font runs (bold/italic,
 inline code, an explicit CJK or emoji face) shapes to the maximum
@@ -60,7 +63,7 @@ advice:
   integer cursor transitions that partition `rows` precisely across split
   blocks. Accumulate them in an `i64`; `baseline_at_row` restores a rebased
   visible baseline without an `i32` saturation path and retains cap-anchor
-  phase. The `i32` `continuation_baseline` form remains available.
+  phase.
 - `RhythmLineMetrics::at_least` and `RhythmGrid::line_metrics_at_least`: grow a
   dynamic line box when its configured height is a floor rather than a fixed
   virtualization budget.
@@ -129,6 +132,9 @@ Verification and fixes:
   on an ancestor's `overflow_hidden`.
 - Platform scope: mixed-run and glyph-fallback semantics are verified on
   macOS/CoreText only; other gpui text backends are not assumed identical.
+  The default gpui integration is additionally compile-checked on Linux and
+  Windows, and the wide-cursor suite covers a multi-block viewport rebase past
+  the `i32` document range.
 
 ## 0.1.0 (2026-08-15)
 

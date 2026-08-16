@@ -544,14 +544,6 @@ impl RhythmBlockMetrics {
         self.grid().size() * row as f32 + self.cap_height.unwrap_or(0.0)
     }
 
-    /// The baseline for a continuation fragment at an accumulated `i32` row
-    /// cursor. [`baseline_at_row`](Self::baseline_at_row) is the wide-cursor
-    /// form for virtualizers.
-    #[inline]
-    pub fn continuation_baseline(&self, row: i32) -> f32 {
-        self.baseline_at_row(i64::from(row))
-    }
-
     /// Row-cursor delta from the first baseline of a *last* fragment of
     /// `lines` visual lines to the block's whole-row bottom edge: `lines − 1`
     /// line advances plus the closing for baseline anchors, or `lines`
@@ -835,13 +827,50 @@ mod tests {
     }
 
     #[test]
-    fn baseline_at_row_and_continuation_preserve_cap_phase() {
+    fn virtualizer_rebases_a_wide_multi_block_cursor_before_float_conversion() {
+        let preceding = RhythmBlockMetrics::new(georgia_line(), 3, 1);
+        let visible = RhythmBlockMetrics::cap(georgia_line(), 11.09, 3, 0);
+
+        let mut document_cursor = i64::from(i32::MAX) * 4;
+        document_cursor = document_cursor
+            .checked_add(i64::from(preceding.rows(40)))
+            .expect("test document cursor overflowed");
+        let visible_top = document_cursor;
+        document_cursor = document_cursor
+            .checked_add(i64::from(visible.rows(9)))
+            .expect("test document cursor overflowed");
+        assert!(document_cursor > i64::from(i32::MAX));
+
+        // The viewport starts two rows before the visible block. Only these
+        // small relative cursors cross the i64 -> f32 boundary, so adjacent
+        // baselines remain exact even though the document cursor is huge.
+        let viewport_origin = visible_top
+            .checked_sub(2)
+            .expect("test viewport origin overflowed");
+        let first_row = visible_top
+            .checked_add(i64::from(visible.top()))
+            .and_then(|row| row.checked_sub(viewport_origin))
+            .expect("test first baseline cursor overflowed");
+        let continuation_row = visible_top
+            .checked_add(i64::from(visible.first_rows(2)))
+            .and_then(|row| row.checked_sub(viewport_origin))
+            .expect("test continuation cursor overflowed");
+
+        let first_baseline = visible.baseline_at_row(first_row);
+        let continuation_baseline = visible.baseline_at_row(continuation_row);
+        assert!((first_baseline - (GRID.height(2) + visible.first_baseline())).abs() < 1e-6);
+        assert!(
+            (continuation_baseline - first_baseline - 2.0 * visible.line().line_height()).abs()
+                < 1e-4
+        );
+    }
+
+    #[test]
+    fn baseline_at_row_preserves_cap_phase() {
         let cap = RhythmBlockMetrics::cap(georgia_line(), 11.09, 3, 0);
         let row = cap.first_rows(2);
-        assert_eq!(
-            cap.baseline_at_row(i64::from(row)),
-            cap.continuation_baseline(row)
-        );
+        let expected = cap.first_baseline() + 2.0 * cap.line().line_height();
+        assert!((cap.baseline_at_row(i64::from(row)) - expected).abs() < 1e-5);
         assert!((cap.baseline_at_row(0) - 11.09).abs() < 1e-6);
     }
 
