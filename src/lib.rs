@@ -41,7 +41,7 @@
 //! }
 //! ```
 //!
-//! The repository's `demo` example doubles as a recipe collection: a page
+//! The repository's `recipes` example doubles as a recipe collection: a page
 //! scaffold, baseline- and cap-anchored openings, a drop cap with true
 //! wrap-around, fluid-width media padded or cropped to whole rhythm rows, and
 //! mixed fonts (sizes, families, scripts) sharing one alphabetic baseline.

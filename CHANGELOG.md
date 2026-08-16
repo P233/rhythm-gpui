@@ -36,8 +36,10 @@ embeds) no longer knocks everything after it off the grid:
   content evenly between its top and bottom edges. The content overlays a
   measured sizer leaf, so the box reserves its height before an image loads —
   no layout shift.
-- Demo: a fluid-width image with a pad/crop toolbar toggle.
-- Demo toolbar controls now participate in one Tab / Shift-Tab order and reuse
+- `recipes` example (renamed from `demo` to say what it collects): a
+  fluid-width 21:9 image with a pad/crop toolbar toggle.
+- Toolbar controls in the `recipes` example now participate in one Tab /
+  Shift-Tab order and reuse
   their click handlers for Enter/Space activation. Font downloads reject an
   oversized response explicitly instead of registering truncated bytes.
 

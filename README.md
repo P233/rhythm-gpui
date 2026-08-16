@@ -13,9 +13,9 @@ over typographic layout in gpui apps.
 Unlike the Sass original, **no hand-measured `baseline-ratio` is required**:
 metrics are read from the actual font file through gpui's text system.
 
-![The demo with the grid overlay on: a three-line drop cap, fluid-width media in pad mode, and four fonts of different sizes and scripts sharing one baseline, all composed on the grid](assets/demo.png)
+![The recipes example with the grid overlay on: a three-line drop cap, fluid-width media in pad mode, and four fonts of different sizes and scripts sharing one baseline, all composed on the grid](assets/recipes.png)
 
-_`cargo run --example demo` — switch the typeface and every baseline keeps its
+_`cargo run --example recipes` — switch the typeface and every baseline keeps its
 appointment with the grid: the drop cap spans three lines, fluid-width media
 pads or crops to whole rows at every window width, and four runs (serif,
 monospace, CJK) share a single alphabetic baseline computed from their
@@ -100,23 +100,23 @@ and the gpui-free math layer — is documented on
 ## Demo & recipes
 
 ```
-cargo run --example demo   # font picker, drop cap, heading anchor toggle,
-                           # fluid media pad/crop, mixed-font baseline row,
-                           # grid overlay;
-                           # downloads Google Fonts on demand
+cargo run --example recipes   # font picker, drop cap, heading anchor toggle,
+                              # fluid media pad/crop, mixed-font baseline row,
+                              # grid overlay;
+                              # downloads Google Fonts on demand
 ```
 
 The toolbar follows a single Tab / Shift-Tab order; Enter or Space activates
 the focused font or toggle without a separate keyboard-only behavior path.
 
-The demo doubles as a recipe collection:
+The example is a recipe collection:
 
 - **Page scaffold** — open with `baseline_top`, chain blocks with
   `baseline_between`, close with `baseline_bottom`.
 - **Optical heading** — `cap_top` lands the capitals' _ink_, not the baseline,
   on a grid line; the paired `cap_bottom` returns the trimmed space so the
   block still spans whole rows and everything below stays in rhythm — closing
-  with `baseline_bottom` instead would not. Flip the demo's heading toggle to
+  with `baseline_bottom` instead would not. Flip the example's heading toggle to
   compare the two openings live: with the cap anchor, switching typefaces
   keeps the ink pinned while the baseline wobbles, and vice versa.
 - **Drop cap with true wrap-around** — `body.drop_cap(ts, font, 3)`
@@ -124,7 +124,7 @@ The demo doubles as a recipe collection:
   applies the anchor as a relative inset, because for cap-heavy faces (cap
   height > ascent − descent, e.g. Merriweather) the anchor is a _downward_
   shift, and a margin would stretch the flex row and push everything below off
-  the grid. Wrap-around text splitting: `drop_cap_paragraph` in the demo.
+  the grid. Wrap-around text splitting: `drop_cap_paragraph` in the example.
 - **Media on the grid** — a fluid-width image's height is not generally an exact
   number of rhythm rows, so everything after it would drift off the grid.
   `rhythm_frame(grid, ratio)`, where `ratio` is width divided by height, fits it
@@ -135,7 +135,7 @@ The demo doubles as a recipe collection:
   snapped height. Style the child to fill the frame's natural-ratio content box
   — use `.size_full().object_fit(ObjectFit::Cover)` when the image itself has a
   different ratio.
-  Toggle pad/crop in the demo and resize the window: the mixed-font row
+  Toggle pad/crop in the example and resize the window: the mixed-font row
   below stays in rhythm at every width. With a known column width, skip the
   frame: `div().w(w).h(grid.snap_up(w / ratio))`.
 - **Mixed fonts on one baseline** — different sizes, families, and scripts

@@ -16,7 +16,7 @@ authors = ["Peiwen Lu <hi@peiwen.lu>"]
 # absent); crates.io rewrites the relative screenshot link to the
 # repository's raw URL at the published commit.
 exclude = [
-    "assets/demo.png",
+    "assets/recipes.png",
     "tests/fonts/",
     ".github/",
     ".githooks/",
@@ -45,7 +45,7 @@ criterion = "0.5"
 ureq = "2"
 
 [[example]]
-name = "demo"
+name = "recipes"
 required-features = ["gpui"]
 test = true
 

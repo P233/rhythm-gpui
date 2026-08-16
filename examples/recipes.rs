@@ -23,7 +23,7 @@ use gpui::{
 };
 use rhythm_gpui::{rhythm_frame, RhythmDropCap, RhythmFont, RhythmGrid, RhythmStyled};
 
-gpui::actions!(rhythm_demo, [FocusNext, FocusPrevious]);
+gpui::actions!(rhythm_recipes, [FocusNext, FocusPrevious]);
 
 #[derive(Clone, Copy, PartialEq)]
 enum Source {
@@ -452,7 +452,7 @@ impl Demo {
     fn media_figure(&self) -> impl IntoElement {
         let image_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/placeholder.png");
         let image = img(image_path).size_full().object_fit(ObjectFit::Cover);
-        let frame = rhythm_frame(self.grid, 16. / 9.);
+        let frame = rhythm_frame(self.grid, 21. / 9.);
         let frame = if self.crop_media { frame.crop() } else { frame };
         div()
             .mt(self.set.body.baseline_bottom(3))
