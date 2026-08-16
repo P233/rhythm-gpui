@@ -56,10 +56,18 @@ impl RhythmGrid {
         );
     }
 
+    /// Axis-neutral length of `n` rhythm units. Use this for horizontal
+    /// indents, gaps, or padding measured with the same scale as the vertical
+    /// rhythm.
+    #[inline]
+    pub fn spacing(&self, n: i32) -> Pixels {
+        px(self.core().spacing(n))
+    }
+
     /// Total height of `n` rhythm units (rhythm-sass `rhythm($n)`).
     #[inline]
     pub fn height(&self, n: i32) -> Pixels {
-        px(self.core().height(n))
+        self.spacing(n)
     }
 
     /// Round `height` up to whole rhythm rows — the pad strategy for content
@@ -101,9 +109,8 @@ impl RhythmGrid {
         RhythmLineMetrics::new(ascent.into(), descent.into(), line_rhythms, self.core())
     }
 
-    /// [`line_metrics`](Self::line_metrics) with `line_rhythms` as a floor
-    /// rather than a promise: the line box grows to hold ink that shaped
-    /// taller than the style predicted. See [`RhythmLineMetrics::at_least`].
+    /// [`line_metrics`](Self::line_metrics) with `line_rhythms` as a floor:
+    /// grow the line box when the shaped ink needs more rows.
     pub fn line_metrics_at_least(
         &self,
         ascent: Pixels,
@@ -113,9 +120,7 @@ impl RhythmGrid {
         RhythmLineMetrics::at_least(ascent.into(), descent.into(), line_rhythms, self.core())
     }
 
-    /// The smallest line box on this grid containing every line in
-    /// `metrics` — [`RhythmLineMetrics::covering`] with the grid slot filled
-    /// in; see it for what the covering count is for.
+    /// The smallest line box on this grid containing every line in `metrics`.
     ///
     /// # Panics
     ///
@@ -197,10 +202,9 @@ impl RhythmGrid {
     }
 }
 
-/// `Pixels`-typed mirrors of the shaped-line geometry, so a gpui paint path
-/// carries the type end to end instead of unwrapping arguments with
-/// `f32::from` and rewrapping results with `px`. Each is the identically named
-/// `f32` method, converted; the pure-math layer stays free of gpui.
+/// `Pixels`-typed mirrors of shaped-line geometry, so a gpui paint path can
+/// keep lengths typed across the integration boundary. Row counts remain
+/// integers because they identify grid rows rather than pixel lengths.
 impl RhythmLineMetrics {
     /// [`ascent`](Self::ascent) in `Pixels`.
     #[inline]
@@ -247,10 +251,8 @@ impl RhythmLineMetrics {
     }
 }
 
-/// `Pixels`-typed mirrors of the block geometry; see the
-/// [`RhythmLineMetrics`] mirrors for the rationale. The row counts
-/// ([`rows`](Self::rows), [`first_rows`](Self::first_rows) and siblings) stay
-/// `i32`: they are grid rows, not lengths.
+/// `Pixels`-typed mirrors of block geometry; see the [`RhythmLineMetrics`]
+/// mirrors for the integration-boundary rule.
 impl RhythmBlockMetrics {
     /// [`opening`](Self::opening) in `Pixels`.
     #[inline]
@@ -274,6 +276,12 @@ impl RhythmBlockMetrics {
     #[inline]
     pub fn continuation_baseline_px(&self, row: i32) -> Pixels {
         px(self.continuation_baseline(row))
+    }
+
+    /// [`baseline_at_row`](Self::baseline_at_row) in `Pixels`.
+    #[inline]
+    pub fn baseline_at_row_px(&self, row: i64) -> Pixels {
+        px(self.baseline_at_row(row))
     }
 
     /// [`height`](Self::height) in `Pixels`.
@@ -724,8 +732,8 @@ impl RhythmFontSpec {
     ///
     /// Keep placing each shaped line with its own `ascent`/`descent` at this
     /// font's [`line_rhythms`](FontRhythm::line_rhythms); with the height
-    /// settled here, [`RhythmLineMetrics::at_least`] has nothing left to
-    /// grow. Resolve the run faces at that same count when their own metrics
+    /// settled here, no shaped mixture of the covered set outgrows it.
+    /// Resolve the run faces at that same count when their own metrics
     /// are used for placement — [`spec`](RhythmFont::spec) on the returned
     /// font carries it, and reproduces these metrics as usual.
     ///
@@ -1093,6 +1101,8 @@ mod tests {
     #[test]
     fn pixels_mirrors_agree_with_the_math_layer() {
         let grid = RhythmGrid::new(px(8.0));
+        assert_eq!(grid.spacing(5), px(40.0));
+        assert_eq!(grid.height(5), grid.spacing(5));
         let line = grid.line_metrics(px(14.67), px(3.51), 3);
         assert_eq!(line.ascent_px(), px(line.ascent()));
         assert_eq!(line.descent_px(), px(line.descent()));
@@ -1115,6 +1125,11 @@ mod tests {
             block.continuation_baseline_px(block.first_rows(2)),
             px(block.continuation_baseline(block.first_rows(2)))
         );
+        let wide_row = i64::from(i32::MAX) * 4;
+        assert_eq!(
+            block.baseline_at_row_px(wide_row),
+            px(block.baseline_at_row(wide_row))
+        );
         assert_eq!(block.height_px(5), px(block.height(5)));
         assert_eq!(block.first_height_px(2), px(block.first_height(2)));
         assert_eq!(block.middle_height_px(4), px(block.middle_height(4)));
@@ -1122,16 +1137,17 @@ mod tests {
     }
 
     #[test]
-    fn line_metrics_at_least_grows_the_box_in_one_step() {
+    fn line_metrics_grid_helpers_match_the_math_layer() {
         let grid = RhythmGrid::new(px(8.0));
-        // 26px of ink overflows a 3-row box; the floor is raised to 4 rows.
         let grown = grid.line_metrics_at_least(px(20.0), px(6.0), 3);
         assert_eq!(grown.line_rhythms(), 4);
         assert!(!grown.overflows_line_box());
+
+        let body = grid.line_metrics(px(14.67), px(3.51), 3);
+        let display = grid.line_metrics(px(28.8), px(6.4), 3);
         assert_eq!(
-            grid.line_metrics_at_least(px(14.67), px(3.51), 3)
-                .line_rhythms(),
-            3
+            grid.line_metrics_covering(&[body, display]),
+            RhythmLineMetrics::covering(&[body, display], body.grid())
         );
     }
 
@@ -1387,16 +1403,12 @@ mod tests {
     }
 
     #[test]
-    fn covering_line_metrics_mirror_the_math_layer() {
+    fn covering_reaches_the_math_layer_from_grid_built_lines() {
         let grid = RhythmGrid::new(px(8.0));
         let body = grid.line_metrics(px(14.67), px(3.51), 3);
         let display = grid.line_metrics(px(28.8), px(6.4), 3);
         let covering = grid.line_metrics_covering(&[body, display]);
 
-        assert_eq!(
-            covering,
-            RhythmLineMetrics::covering(&[body, display], Rhythm::new(8.0))
-        );
         // Three rows cannot hold the display face's ink; five can, and every
         // mixture of the pair fits that count.
         assert_eq!(covering.line_rhythms(), 5);

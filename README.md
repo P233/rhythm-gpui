@@ -76,6 +76,7 @@ let heading = grid.font(cx.text_system(), font("Georgia"), px(28.), 5);
 
 // 3. Spacing comes from the fonts themselves, wherever gpui expects a length.
 div()
+    .px(grid.spacing(6))
     .pt(heading.baseline_top(5))
     .child(div().rhythm_font(&heading).child("Title"))
     .child(
@@ -85,6 +86,10 @@ div()
             .child("Body text, aligned to the grid."),
     )
 ```
+
+`grid.spacing(n)` is the axis-neutral length of `n` rhythm units, for layouts
+that reuse the same scale for horizontal padding, gaps, or indents.
+`grid.height(n)` remains the vertical name for the same length.
 
 Everything else — the spacing functions, `RhythmFont` resolution and accessors,
 the `RhythmDropCap` / `DropCapRhythm` solvers, the `RhythmStyled` extension, the
@@ -159,10 +164,10 @@ Document renderers that shape text themselves skip the element layer: build
 `RhythmLineMetrics` from each shaped line's real `ascent()` / `descent()` —
 the maxima over its explicit font runs, which is how lines mixing bold,
 inline code, CJK, or emoji faces actually shape — lay blocks out with
-`RhythmBlockMetrics` (baseline- or cap-anchored, with first/middle/last
-fragment heights that keep the rhythm phase across virtualized splits), and
-place every baseline with `paint_origin_for(target)`. Glyph fallback needs no
-special handling: substituted glyphs never grow the line box.
+`RhythmBlockMetrics` (baseline or cap-ink anchors, concrete fragment geometry,
+and exact integer row arithmetic), and place every baseline with
+`paint_origin_for(target)`. Glyph fallback needs no special handling:
+substituted glyphs never grow the line box.
 
 Settle the row budget at catalog-build time. A style's lines can draw on more
 faces than its own — bold, inline code, an explicit CJK or emoji face, or
@@ -175,18 +180,24 @@ per shaped line. Nothing is shaped to compute it, which is what makes a
 block's height a function of its line count — the property virtualization
 needs.
 
-Two conveniences for that path: `first_rows` / `middle_rows` / `last_rows` are
-ordered integer cursor transitions that partition `rows(lines)` across a split
-block. After a first or middle fragment, `continuation_baseline(cursor)` turns
-the accumulated row back into the next baseline (including a cap anchor's
-phase); `paint_origin_for` then locates that fragment's line-box top. A
-virtualizer therefore converts only visible positions instead of summing `f32`
-heights over thousands of blocks. `line_metrics_at_least(ascent, descent, n)`
-also treats the style's line height as a floor, growing the box in one step when
-an explicit run shaped taller than the style predicted. Both metric types carry
-`Pixels`-typed `_px` mirrors (`line_height_px`, `baseline_above_px`,
-`paint_origin_for_px`, the block baselines and heights) so a gpui paint path
-never converts by hand.
+For a dynamic, non-virtualized line whose configured height is only a floor,
+`line_metrics_at_least` remains the one-step overflow-growing path. The fixed
+covering budget is the stronger contract when block height must be known before
+shaping.
+
+Virtualization runs on integer rows: `first_rows` / `middle_rows` /
+`last_rows` are ordered `i32` cursor transitions that partition `rows(lines)`
+across a split block. Accumulate them in an `i64`; `baseline_at_row(cursor)`
+turns the rebased visible row into its baseline, and `paint_origin_for` then
+locates that fragment's line-box top. The final coordinate is still `f32`, so
+rebase near the viewport rather than converting an enormous absolute row. A
+virtualizer therefore converts only visible positions instead of summing
+`f32` heights over thousands of blocks. The `direct_paint` example deliberately
+shows the non-virtualized whole-document path; a production virtualizer owns
+the absolute `i64` row and viewport-row origin needed for this rebase. Geometry
+also carries `Pixels`-typed `_px` mirrors (including `line_height_px`,
+`paint_origin_for_px`, `first_baseline_px`, and `baseline_at_row_px`) so gpui
+callers need not convert lengths by hand.
 
 The lifecycle contract: a `RhythmFont` is an immutable resolved value. Within
 the crate, only its resolution factories query the `TextSystem`; document

@@ -20,6 +20,9 @@ that guarded it — is gone from the new paths.
 - `RhythmStyled::rhythm_block(&font, top, bottom)`: the whole-rows text-block
   recipe (font plus baseline-paired paddings) in one call.
 - `RhythmFont::grid()` accessor.
+- `Rhythm::spacing(n)` / `RhythmGrid::spacing(n)`: an axis-neutral rhythm-unit
+  length for horizontal padding, gaps, and indents; `height(n)` remains the
+  vertical name for the same calculation.
 
 Media support — content whose height follows its width (images, video,
 embeds) no longer knocks everything after it off the grid:
@@ -49,20 +52,21 @@ advice:
   chosen line box. Factories: `RhythmGrid::line_metrics(ascent, descent, n)`,
   `RhythmFont::line_metrics()`, `FontRhythm::line_metrics(grid)`.
 - `RhythmBlockMetrics`: whole-row block geometry over one line's metrics —
-  baseline anchors (`new`) or cap-ink anchors (`cap`, the pure form of the
-  `cap_top`/`cap_bottom` pair), `opening`/`closing`, `first_baseline`, exact
-  integer `rows`, and first/middle/last fragment heights that keep the
-  rhythm phase across virtualized splits.
+  baseline anchors (`new`) or cap-ink anchors (`cap`), opening/closing and
+  first/middle/last fragment heights, `first_baseline`, and exact integer
+  `rows`, so callers can use concrete geometry without accumulated `f32`
+  drift or keep a row cursor for virtualization.
 - `RhythmBlockMetrics::first_rows` / `middle_rows` / `last_rows`: ordered
   integer cursor transitions that partition `rows` precisely across split
-  blocks. `continuation_baseline` restores the baseline (including a cap
-  anchor's phase) only when a fragment is painted, so virtualized renderers do
-  not accumulate drifting `f32` heights.
-- `RhythmLineMetrics::at_least` and `RhythmGrid::line_metrics_at_least`: build
-  a line whose configured height is a floor, growing the box to
-  `min_line_rhythms` in one step instead of constructing the metrics twice.
+  blocks. Accumulate them in an `i64`; `baseline_at_row` restores a rebased
+  visible baseline without an `i32` saturation path and retains cap-anchor
+  phase. The `i32` `continuation_baseline` form remains available.
+- `RhythmLineMetrics::at_least` and `RhythmGrid::line_metrics_at_least`: grow a
+  dynamic line box when its configured height is a floor rather than a fixed
+  virtualization budget.
 - `RhythmLineMetrics::covering` (with `RhythmGrid::line_metrics_covering` and
-  `RhythmFontSpec::resolve_covering`): fix a style's line height over the
+  `RhythmFontSpec::resolve_covering` as typed and resolution-time entries): fix
+  a style's line height over the
   whole same-size, same-grid set of faces its lines can draw on — its own, its
   run faces, and the families gpui would resolve to if one were missing —
   instead of per shaped line. Since a line shapes to the maxima over its runs,
@@ -73,10 +77,10 @@ advice:
   `resolve_covering` grows only the line height — metrics, cap height, and
   baselines stay the primary face's, and the returned font's `spec()` still
   reproduces it.
-- `Pixels`-typed `_px` mirrors on both metric types under the `gpui` feature
-  (`line_height_px`, `baseline_above_px`, `paint_origin_for_px`, the block
-  baselines/openings/heights, …), so the paint path keeps the type end to end
-  instead of unwrapping with `f32::from` and rewrapping with `px`.
+- `Pixels`-typed `_px` mirrors under the `gpui` feature for line and block
+  geometry, including the new wide-cursor `baseline_at_row_px`, so gpui callers
+  can keep lengths typed instead of unwrapping with `f32::from` and rewrapping
+  with `px`.
 - Glyph-level fallback still needs no special handling: substituted glyphs
   never enter a line's shaped ascent (CoreText-verified).
 - `direct_paint` example: resolve a font set once — the body style covering
@@ -109,14 +113,14 @@ Verification and fixes:
   (`tests/fonts/`, excluded from the published package — the suite
   self-skips without them), plus a covering-budget group: a line height
   resolved over a face set really does hold every mixture those faces shape
-  to, with nothing left for `at_least` to grow. Found upstream:
+  to, settled before anything is shaped. Found upstream:
   `TextSystem::baseline_offset`
   disagrees with the paint path by one descent on macOS (raw negative
   descent vs shaped positive), so the paint equation is the oracle instead.
 - `rhythm_overlay` now paints only the rows intersecting the visible region
   (content mask), keeping the stripe phase anchored to the container — debug
   overlays on very tall documents cost `O(viewport)`, not `O(document)`.
-- `rhythm_overlay` returns a named `RhythmOverlay` element carrying
+- `rhythm_overlay` returns a named, exported `RhythmOverlay` element carrying
   `.phase(offset)`: the stripe pattern anchors that far above the element's
   top edge, for renderers that scroll by painting content at a computed
   offset instead of moving a scroll container — the translated wrapper that

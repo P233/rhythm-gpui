@@ -343,7 +343,9 @@ mod suite {
                 !metrics.overflows_line_box(),
                 "covered mixture overflowed the budget of {budget} rows"
             );
-            // Nothing left for `at_least` to grow: the budget is the height.
+            // The budget was settled before shaping: no shaped mixture needs
+            // a taller box than the covering count.
+            assert!(metrics.min_line_rhythms() <= budget);
             assert_eq!(
                 grid.line_metrics_at_least(line.ascent(), line.descent(), budget),
                 metrics

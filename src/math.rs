@@ -46,11 +46,18 @@ impl Rhythm {
         self.size
     }
 
+    /// Axis-neutral length of `n` rhythm units. Use this when the vertical grid
+    /// also supplies horizontal indents, gaps, or padding.
+    #[inline]
+    pub fn spacing(&self, n: i32) -> f32 {
+        self.size * n as f32
+    }
+
     /// Total height of `n` rhythm units. Equivalent to rhythm-sass `rhythm($n)`;
     /// apply offsets with plain addition: `grid.height(5) - 1.0`.
     #[inline]
     pub fn height(&self, n: i32) -> f32 {
-        self.size * n as f32
+        self.spacing(n)
     }
 
     /// Spacing from an element's top edge up to the nth grid line above the first
@@ -345,25 +352,25 @@ impl FontRhythm {
     /// The line height on `grid`: [`line_rhythms`](Self::line_rhythms) whole rhythm units.
     #[inline]
     pub fn line_height(&self, grid: Rhythm) -> f32 {
-        grid.size() * self.line_rhythms as f32
+        self.line_metrics(grid).line_height()
     }
 
     /// Extra space split above and below the `ascent + descent` box.
     #[inline]
     pub fn half_leading(&self, grid: Rhythm) -> f32 {
-        (self.line_height(grid) - self.ascent - self.descent) / 2.0
+        self.line_metrics(grid).half_leading()
     }
 
     /// Distance from the top of the line box down to the baseline.
     #[inline]
     pub fn baseline_above(&self, grid: Rhythm) -> f32 {
-        self.half_leading(grid) + self.ascent
+        self.line_metrics(grid).baseline_above()
     }
 
     /// Distance from the baseline down to the bottom of the line box.
     #[inline]
     pub fn baseline_below(&self, grid: Rhythm) -> f32 {
-        self.half_leading(grid) + self.descent
+        self.line_metrics(grid).baseline_below()
     }
 
     /// Invisible space between the top of the line box and the cap top: the amount
@@ -513,8 +520,12 @@ mod tests {
     }
 
     #[test]
-    fn rhythm_height() {
+    fn rhythm_spacing_and_height() {
+        assert_eq!(GRID.spacing(5), 40.0);
+        assert_eq!(GRID.spacing(0), 0.0);
+        assert_eq!(GRID.spacing(-1), -8.0);
         assert_eq!(GRID.height(5), 40.0);
+        assert_eq!(GRID.height(5), GRID.spacing(5));
         assert_eq!(GRID.height(5) - 1.0, 39.0); // offsets are plain addition
         assert_eq!(GRID.height(0), 0.0);
         assert_eq!(GRID.height(-1), -8.0);

@@ -52,27 +52,19 @@
 //! `WrappedLine`s skip the element layer entirely: build [`RhythmLineMetrics`]
 //! from each shaped line's real `ascent()` / `descent()` — the maxima over its
 //! explicit font runs, which is how lines mixing bold, inline code, CJK, or
-//! emoji faces actually shape — lay blocks out with [`RhythmBlockMetrics`]
-//! (first/middle/last fragment heights, plus the integer `first_rows` /
-//! `middle_rows` / `last_rows` cursor and `continuation_baseline` for split
-//! blocks), and place every baseline with `paint_origin_for`. Under the `gpui`
-//! feature both metric types also expose `Pixels`-typed `_px` mirrors, so the
-//! paint path never converts by hand. The `direct_paint` example is the
-//! complete recipe.
-//!
-//! Settle each style's line height at catalog-build time with
-//! [`RhythmLineMetrics::covering`] — or `RhythmFontSpec::resolve_covering`,
-//! which resolves a font at the count covering its whole same-size run set.
-//! Because no mixture of those faces can shape past the covering box, the row
-//! budget is known before anything is shaped, and a block's height follows
-//! from its line count alone: the property virtualization is built on.
+//! emoji faces actually shape — lay blocks out with [`RhythmBlockMetrics`],
+//! and place every baseline with `paint_origin_for`. Under the `gpui` feature,
+//! geometry has `Pixels`-typed `_px` mirrors so the paint path need not convert
+//! by hand. The `direct_paint` example is the complete non-virtualized
+//! shape/cache/paint recipe. A virtualizer additionally accumulates
+//! `first_rows` / `middle_rows` / `last_rows` in an `i64` and rebases that row
+//! cursor near the viewport before converting visible positions to `f32`.
 //!
 //! # Performance contract
 //!
 //! - [`Rhythm`], [`FontRhythm`], and line/block geometry are small `Copy`
-//!   values. Their scalar geometry and spacing methods are O(1), while
-//!   [`RhythmLineMetrics::covering`] is O(`metrics.len()`). All remain
-//!   allocation-free and lock-free (enforced by a counting-allocator test),
+//!   values. Their pure geometry and spacing methods are O(1),
+//!   allocation-free, and lock-free (enforced by a counting-allocator test),
 //!   with hot methods `#[inline]` across the crate boundary.
 //! - gpui `TextSystem` access is confined to font/spec/drop-cap resolution
 //!   factories; geometry and spacing on stored values never query it.

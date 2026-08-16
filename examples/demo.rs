@@ -259,7 +259,7 @@ impl Demo {
             // bottom. The toolbar sits above the grid origin (the scrolled
             // wrapper's top edge), so its height is free to vary.
             .py(grid.height(2))
-            .px(grid.height(6))
+            .px(grid.spacing(6))
             .flex()
             .flex_col()
             .gap_1()
@@ -374,7 +374,7 @@ impl Demo {
 
         // Same width the flex_1 text child will get: viewport minus the
         // container's horizontal padding, the cap, and the gap.
-        let container_width = window.viewport_size().width - grid.height(6) * 2.;
+        let container_width = window.viewport_size().width - grid.spacing(6) * 2.;
         let wrap_width = (container_width - cap_width - cap_gap).max(px(48.));
 
         let split = window
@@ -463,7 +463,7 @@ impl Demo {
         div()
             .flex()
             .items_start()
-            .gap(grid.height(3))
+            .gap(grid.spacing(3))
             .mt(grid.height(6) - px(max_above))
             .children(spans.map(|(span_font, text, color)| {
                 div()
@@ -517,7 +517,7 @@ impl Render for Demo {
                         .min_h_full()
                         .child(
                             div()
-                                .px(grid.height(6))
+                                .px(grid.spacing(6))
                                 .pb(self.set.body.baseline_bottom(3))
                                 .child(
                                     div()
@@ -538,7 +538,7 @@ impl Render for Demo {
                                         .rhythm_font(&self.set.quote)
                                         .text_color(rgb(0x57606a))
                                         .mt(self.set.body.baseline_between(&self.set.quote, 6))
-                                        .pl(grid.height(3))
+                                        .pl(grid.spacing(3))
                                         .border_l(px(2.))
                                         .border_color(rgb(0xd0d7de))
                                         .child(

@@ -1,7 +1,9 @@
 //! Direct-paint renderer: a custom Element that shapes once, caches the
 //! `WrappedLine`s, and paints them straight onto the rhythm grid — the
-//! low-level path a document renderer takes instead of building an element
-//! tree per block.
+//! non-virtualized low-level path a document renderer takes instead of
+//! building an element tree per block. A virtualizer additionally owns an
+//! `i64` absolute-row cursor and rebases it near the viewport before converting
+//! visible coordinates to `f32`.
 //!
 //! The recipe, per the numbered comments below:
 //!
@@ -86,7 +88,7 @@ impl FontSet {
 struct Span(&'static str, Font, u32);
 
 /// A paragraph to shape: spans, the font size to shape at, the style's line
-/// height in whole rhythm units, and the block's opening/closing counts.
+/// height in whole rhythm units, and the block's baseline anchor counts.
 struct Paragraph {
     spans: Vec<Span>,
     font_size: Pixels,
@@ -215,17 +217,17 @@ impl DirectPaint {
             for line in lines {
                 // 3. Shaped maxima → line metrics, in the style's covering
                 //    row budget. Because the budget already holds every face
-                //    these runs can use, there is nothing left for
-                //    `line_metrics_at_least` to grow: the height a
-                //    virtualizer assumed before shaping is the height this
-                //    line gets.
+                //    these runs can use, no shaped line outgrows it: the
+                //    height a virtualizer assumed before shaping is the
+                //    height this line gets.
                 let metrics = grid.line_metrics(line.ascent(), line.descent(), para.line_rhythms);
                 let block = RhythmBlockMetrics::new(metrics, para.top, para.bottom);
                 let visual_lines = line.wrap_boundaries.len() as u32 + 1;
-                // Exact integer rows, never accumulated f32 heights. A
-                // virtualizer that splits a block across pages advances its
-                // cursor with first_rows / middle_rows / last_rows instead;
-                // they partition this same count.
+                // Exact integer rows, never accumulated f32 heights. This
+                // compact whole-document example stays within `i32`; a
+                // virtualizer accumulates first_rows / middle_rows / last_rows
+                // in `i64`, rebases near the viewport, and converts only the
+                // visible row delta.
                 let block_rows = block.rows(visual_lines);
                 blocks.push(CachedBlock {
                     line,
