@@ -71,3 +71,11 @@ jobs:
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+      - name: Verify published package
+        run: cargo package --locked
+      - name: Install nightly for docs.rs
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Build docs.rs configuration
+        run: cargo doc --locked --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings

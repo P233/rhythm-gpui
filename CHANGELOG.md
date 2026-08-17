@@ -15,8 +15,8 @@ that guarded it — is gone from the new paths.
   `body.drop_cap(ts, font, lines)`. `RhythmFont::resolve` and
   `RhythmDropCap::resolve` remain as the explicit forms.
 - `RhythmFont::cap_span(top, bottom)` returns the cap-anchored padding pair as
-  one `Option`, making a cap opening closed with a baseline `bottom` — the
-  off-grid mistake the docs used to warn about — inexpressible.
+  one `Option`, keeping the matching anchors together and making a cap opening
+  accidentally closed with a baseline `bottom` less likely.
 - `RhythmStyled::rhythm_block(&font, top, bottom)`: the whole-rows text-block
   recipe (font plus baseline-paired paddings) in one call.
 - `RhythmFont::grid()` accessor.
@@ -100,9 +100,9 @@ advice:
 
 Resolved-font lifecycle, now a documented contract — within the crate, only
 the resolution factories touch the `TextSystem`; the `Rhythm`, `FontRhythm`,
-and line/block geometry paths afterwards are allocation-free, lock-free
-`Copy` math (enforced by a counting-allocator test). `cargo bench --bench
-resolve` tracks warm resolution, deliberately without ns-level CI thresholds:
+and line/block geometry paths afterwards are allocation-free `Copy` math
+(enforced by a counting-allocator test) and contain no locking. `cargo bench
+--bench resolve` tracks warm resolution, deliberately without ns-level CI thresholds:
 
 - `RhythmFontSpec`: the pre-resolve identity (`Font`, size, line rhythms,
   grid size) as an `Eq + Hash` cache key, with `spec.resolve(ts)` and
@@ -132,12 +132,12 @@ Verification and fixes:
   (content mask), keeping the stripe phase anchored to the container — debug
   overlays on very tall documents cost `O(viewport)`, not `O(document)`.
 - `rhythm_overlay` returns a named, exported `RhythmOverlay` element carrying
-  `.phase(offset)`: the stripe pattern anchors that far above the element's
-  top edge, for renderers that scroll by painting content at a computed
-  offset instead of moving a scroll container — the translated wrapper that
+  `.phase(offset)`: the stripe pattern takes the same signed Y translation as
+  content painted at a computed offset instead of moving a scroll container —
+  including gpui's negative scroll offsets — so the translated wrapper that
   job used to need is gone. Stripes are clipped to the overlay's own bounds,
-  so a phase-lifted first row (and an overhanging last one) no longer depend
-  on an ancestor's `overflow_hidden`.
+  so a translated first row (and an overhanging last one) no longer depends on
+  an ancestor's `overflow_hidden`.
 - Platform scope: mixed-run and glyph-fallback semantics are verified on
   macOS/CoreText only; other gpui text backends are not assumed identical.
   The default gpui integration is additionally compile-checked on Linux and

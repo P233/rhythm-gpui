@@ -1,14 +1,14 @@
 //! Font-picker demo: switch the reading layout between fonts, downloading
 //! Google Fonts on demand and registering them with gpui's text system.
 //!
-//! Showcases metric-derived rhythm: pick any font and every baseline still
-//! lands on the grid, with no per-font `baseline-ratio` lookup. Includes a
-//! three-line drop cap, a mixed-font run (serif, mono, CJK) sharing one
-//! alphabetic baseline, a fluid-width image in a `rhythm_frame` with a
-//! pad/crop toggle, and a toolbar toggle switching the page opening between
-//! a baseline-anchored and a cap-anchored (optical) heading. Fonts are
-//! fetched as TTF via the css2 API (non-browser user agents are served
-//! `truetype` sources) on the background executor.
+//! Showcases metric-derived rhythm: pick any font and baseline-anchored text
+//! still lands on the grid, with no per-font `baseline-ratio` lookup. Includes
+//! a three-line drop cap, a mixed-font row of four runs (two serif sizes, mono,
+//! CJK) sharing one alphabetic baseline, a fluid-width image in a
+//! `rhythm_frame` with a pad/crop toggle, and a toolbar toggle switching the
+//! page opening between a baseline-anchored and a cap-anchored (optical)
+//! heading. Fonts are fetched as TTF via the css2 API (non-browser user agents
+//! are served `truetype` sources) on the background executor.
 
 use std::borrow::Cow;
 use std::collections::HashSet;

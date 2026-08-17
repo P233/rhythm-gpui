@@ -41,8 +41,14 @@ while IFS= read -r -d '' file; do
   fi
 done < <(git diff --name-only -z)
 
-# Content hashes, not `git diff`: for a partially staged file the work tree
-# always differs from the index, which says nothing about what the formatter did.
+if [ ${#partially_staged[@]} -gt 0 ]; then
+  echo "pre-commit: refusing to format files with both staged and unstaged changes:" >&2
+  printf '  %s\n' "${partially_staged[@]}" >&2
+  echo "Stage or stash the unstaged changes before committing again." >&2
+  exit 1
+fi
+
+# Content hashes tell us which fully staged files the formatter changed.
 before_hashes=()
 for file in "${all_files[@]}"; do
   before_hashes+=("$(git hash-object -- "$file")")
@@ -62,22 +68,10 @@ if [ ${#prettier_files[@]} -gt 0 ] && command -v prettier >/dev/null 2>&1; then
   prettier --write --log-level warn "${prettier_files[@]}"
 fi
 
-blocked=()
 index=0
 for file in "${all_files[@]}"; do
   if [ "$(git hash-object -- "$file")" != "${before_hashes[$index]}" ]; then
-    if contains "$file" "${partially_staged[@]}"; then
-      blocked+=("$file")
-    else
-      git add -- "$file"
-    fi
+    git add -- "$file"
   fi
   index=$((index + 1))
 done
-
-if [ ${#blocked[@]} -gt 0 ]; then
-  echo "pre-commit: reformatted files that were only partially staged:" >&2
-  printf '  %s\n' "${blocked[@]}" >&2
-  echo "Stage the formatting yourself (git add -p) and commit again." >&2
-  exit 1
-fi

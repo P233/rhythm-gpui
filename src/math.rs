@@ -9,9 +9,10 @@
 //! baseline_from_top = (line_height - ascent - descent) / 2 + ascent
 //! ```
 //!
-//! Given a line height that is an integer number of rhythm units, the functions
-//! in this module compute the padding/margin that lands every baseline exactly
-//! on a rhythm grid line.
+//! Given a line height that is an integer number of rhythm units, the baseline
+//! spacing functions compute padding/margin that lands each baseline exactly on
+//! a rhythm grid line. The cap-anchoring functions deliberately align the
+//! capitals' ink instead and preserve whole-row block height with a paired close.
 //!
 //! All quantities are `f32` logical pixels; unit conversion (rems, device
 //! scale) belongs to the integration layer.
@@ -490,7 +491,7 @@ fn usable_metric(height: f32) -> Option<f32> {
 
 /// Round `value` to the nearest multiple of `step` (e.g. `1.0 / scale_factor` to
 /// snap a spacing to whole device pixels). The core functions never round, so
-/// baselines land on the grid exactly; snap only final applied values.
+/// baseline-anchored results stay exact; snap only final applied values.
 ///
 /// # Panics
 ///

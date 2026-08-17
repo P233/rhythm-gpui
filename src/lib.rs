@@ -4,16 +4,17 @@
 //! gpui's `WrappedLine` paint path follows the model in [`math`](crate::Rhythm):
 //! the `ascent + descent` box is centered in the line height and the baseline
 //! sits at `(line_height - ascent - descent) / 2 + ascent`.
-//! This crate resolves real font metrics through gpui's text system, so baselines
-//! land on the rhythm grid without the manually measured `baseline-ratio` that the
-//! original Sass library required.
+//! This crate resolves real font metrics through gpui's text system, so
+//! baseline-anchored text lands on the rhythm grid without the manually measured
+//! `baseline-ratio` that the original Sass library required. Cap-anchored helpers
+//! instead align the capitals' ink while preserving whole-row block geometry.
 //!
 //! # Feature flags
 //!
 //! - **`gpui`** (default) — the gpui integration: `RhythmGrid`, `RhythmFont`
 //!   (with `RhythmFontSpec` cache keys), `RhythmDropCap`, the `RhythmStyled`
-//!   extension trait, the `rhythm_frame` media container, and the
-//!   `rhythm_overlay` debug grid.
+//!   extension trait, the `rhythm_frame` media container, and the configurable
+//!   `rhythm_overlay` / `RhythmOverlay` debug grid.
 //! - Disable default features to build only the dependency-free rhythm math
 //!   ([`Rhythm`], [`FontRhythm`], [`RhythmLineMetrics`], [`RhythmBlockMetrics`],
 //!   [`DropCapRhythm`], [`snap`]), usable from any renderer that centers
@@ -63,8 +64,8 @@
 //! # Performance contract
 //!
 //! - [`Rhythm`], [`FontRhythm`], and line/block geometry are small `Copy`
-//!   values. Their pure geometry and spacing methods are O(1),
-//!   allocation-free, and lock-free (enforced by a counting-allocator test),
+//!   values. Their pure geometry and spacing methods are O(1), allocation-free
+//!   (enforced by a counting-allocator test), and lock-free by construction,
 //!   with hot methods `#[inline]` across the crate boundary.
 //! - gpui `TextSystem` access is confined to font/spec/drop-cap resolution
 //!   factories; geometry and spacing on stored values never query it.
@@ -99,8 +100,10 @@ mod frame;
 mod integration;
 
 #[cfg(feature = "gpui")]
+#[cfg_attr(docsrs, doc(cfg(feature = "gpui")))]
 pub use frame::{rhythm_frame, RhythmFrame};
 #[cfg(feature = "gpui")]
+#[cfg_attr(docsrs, doc(cfg(feature = "gpui")))]
 pub use integration::{
     rhythm_overlay, RhythmDropCap, RhythmFont, RhythmFontSpec, RhythmGrid, RhythmOverlay,
     RhythmStyled,

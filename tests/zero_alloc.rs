@@ -1,9 +1,10 @@
 //! Structural performance contract: hot-path geometry allocates nothing.
 //!
 //! A counting global allocator replaces ns-level benchmark thresholds — pure
-//! f32 math varies below measurement noise, but "no allocation, no lock, no
-//! text-system access" is checkable exactly. The single `#[test]` keeps the
-//! harness quiet while the counter window is open.
+//! f32 math varies below measurement noise, but allocation freedom is checkable
+//! exactly. Locking and text-system access are structural source contracts
+//! outside this allocator's scope. The single `#[test]` keeps the harness quiet
+//! while the counter window is open.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};

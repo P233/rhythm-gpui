@@ -6,20 +6,20 @@
 
 Print-inspired vertical rhythm for [gpui](https://www.gpui.rs) — baseline
 offsets computed from real font metrics. Ported from
-[rhythm-sass](https://github.com/p233/rhythm-sass), it lands every text
-baseline exactly on a vertical rhythm grid, giving you pixel-perfect control
-over typographic layout in gpui apps.
+[rhythm-sass](https://github.com/p233/rhythm-sass), its baseline-anchored paths
+land text baselines exactly on a vertical rhythm grid. Cap-anchored openings
+instead pin the capitals' ink while keeping each block on whole rhythm rows.
 
 Unlike the Sass original, **no hand-measured `baseline-ratio` is required**:
 metrics are read from the actual font file through gpui's text system.
 
-![The recipes example with the grid overlay on: a three-line drop cap, fluid-width media in pad mode, and four fonts of different sizes and scripts sharing one baseline, all composed on the grid](assets/recipes.png)
+![The recipes example with the grid overlay on: a three-line drop cap, fluid-width media in pad mode, and four text runs at different sizes and scripts sharing one baseline, all composed on the grid](assets/recipes.png)
 
-_`cargo run --example recipes` — switch the typeface and every baseline keeps its
-appointment with the grid: the drop cap spans three lines, fluid-width media
-pads or crops to whole rows at every window width, and four runs (serif,
-monospace, CJK) share a single alphabetic baseline computed from their
-respective metrics._
+_`cargo run --example recipes` — switch the typeface and baseline-anchored text
+keeps its appointment with the grid: the drop cap spans three lines,
+fluid-width media pads or crops to whole rows at every window width, and four
+runs (two serif sizes, monospace, CJK) share a single alphabetic baseline
+computed from their respective metrics._
 
 ## How it works
 
@@ -38,6 +38,11 @@ which is why looking it up per font is no longer necessary.
 
 ## Installation
 
+> **Pre-release:** `main` currently documents the unreleased `0.2.0` API. The
+> latest published crate and [docs.rs API](https://docs.rs/rhythm-gpui/0.1.0/rhythm_gpui/)
+> are still `0.1.0`; the dependency below will resolve after `0.2.0` is
+> published.
+
 ```toml
 [dependencies]
 rhythm-gpui = "0.2"
@@ -48,7 +53,7 @@ The crate has two layers behind one package:
 - **`gpui` feature** (default) — the gpui integration: metric resolution through
   `TextSystem` (with `RhythmFontSpec` cache keys and the resolved `FontId`),
   `Pixels`-typed spacing, drop caps, the fluid-width `RhythmFrame`, the
-  `RhythmStyled` extension, and the debug overlay.
+  `RhythmStyled` extension, and the configurable `RhythmOverlay` debug grid.
 - **`default-features = false`** — only the dependency-free rhythm math
   (`Rhythm`, `FontRhythm`, `RhythmLineMetrics`, `RhythmBlockMetrics`,
   `DropCapRhythm`, `snap`, and height snapping). Any renderer that centers
@@ -93,9 +98,10 @@ that reuse the same scale for horizontal padding, gaps, or indents.
 
 Everything else — the spacing functions, `RhythmFont` resolution and accessors,
 the `RhythmDropCap` / `DropCapRhythm` solvers, the `RhythmStyled` extension, the
-`rhythm_frame` / `RhythmFrame` media container, the `rhythm_overlay` debug grid,
-and the gpui-free math layer — is documented on
-**[docs.rs](https://docs.rs/rhythm-gpui)**.
+`rhythm_frame` / `RhythmFrame` media container, the `rhythm_overlay` /
+`RhythmOverlay` debug grid, and the gpui-free math layer — is documented in the
+checked-out crate's rustdoc (`cargo doc --open`). Published versions remain
+available on **[docs.rs](https://docs.rs/rhythm-gpui)**.
 
 ## Demo & recipes
 
@@ -143,20 +149,24 @@ The example is a recipe collection:
   metrics, but ideographs are drawn on the em square, so their ink dips
   slightly below the shared line — standard mixed-script behavior.
 - **Debug overlay** — chain `.rhythm_debug_overlay(grid, show)` on the page
-  container to toggle the stripes while developing; every other grid row is
-  painted in the classic translucent red so you can verify baselines land on
-  them. The same toggle accepts a configured overlay in place of the grid:
+  container, after its content children so the stripes paint on top (gpui
+  paints later siblings over earlier ones), to toggle the grid while
+  developing; every other grid row is painted in the classic translucent red
+  so you can verify baseline-anchored text lands on them. The same toggle
+  accepts a configured overlay in place of the grid:
   `.rhythm_debug_overlay(grid.overlay(gpui::rgba(0x0969da33)), show)` picks
-  the grid color, and `.phase(offset)` on the overlay re-anchors the stripes
-  for renderers that scroll by painting content at a computed offset instead
-  of moving a scroll container.
+  the grid color, and `.phase(content_offset_y)` on the overlay accepts the
+  same signed Y translation used to paint content for renderers that scroll
+  without moving a scroll container. A gpui `ScrollHandle`'s negative
+  `offset().y` can be passed through directly.
 - **Device-pixel snapping** — the functions are exact to float precision
   (no whole-pixel rounding, unlike the Sass version); use `snap` to round a
-  final value to whole device pixels. gpui rounds text line heights to whole
-  logical pixels and snaps Taffy layout edges to device-pixel boundaries. Keep
-  `grid × line_rhythms` whole in logical pixels so gpui does not alter the line
-  height; each remaining fractional layout edge can differ from the exact math
-  by up to half a device pixel.
+  final value to whole device pixels. gpui's `Window::line_height()` helper
+  rounds to whole logical pixels, while ordinary `StyledText` preserves an
+  explicitly specified pixel line height before Taffy snaps layout edges to
+  device-pixel boundaries. Keep `grid × line_rhythms` whole when the value may
+  flow through the rounded helper; independently, each final fractional layout
+  edge can differ from the exact math by up to half a device pixel.
 
 ## Custom renderers (direct paint)
 
@@ -223,7 +233,7 @@ baseline-anchored block with `baseline_bottom`, or a cap-anchored block with
 the paired `cap_bottom`. Blocks then compose freely without breaking the page
 rhythm. `.rhythm_block(&font, top, bottom)` applies the baseline-paired recipe
 (font + both paddings) in one call, and `font.cap_span(top, bottom)` hands the
-cap pair as one value so the anchors cannot be mismatched.
+cap pair back as one value, reducing the chance of applying mismatched anchors.
 
 ## Development
 

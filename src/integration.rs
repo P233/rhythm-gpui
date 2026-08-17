@@ -414,6 +414,12 @@ impl RhythmFont {
 
     /// Compatibility constructor for a Plumber/rhythm-sass `baseline-ratio`.
     /// Prefer [`Self::resolve`]; see [`FontRhythm::from_baseline_ratio`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when the font weight is zero, negative, or non-finite, when
+    /// `font_size` is zero, negative, or non-finite, when `line_rhythms` is
+    /// zero, or when `baseline_ratio` is not strictly between 0 and 1.
     pub fn from_baseline_ratio(
         font: Font,
         font_size: Pixels,
@@ -421,6 +427,7 @@ impl RhythmFont {
         baseline_ratio: f32,
         grid: RhythmGrid,
     ) -> Self {
+        assert_valid_font_request(&font, font_size, line_rhythms);
         Self {
             font,
             font_id: None,
@@ -552,8 +559,8 @@ impl RhythmFont {
 
     /// The cap-anchored opening as one paired value:
     /// `(cap_top(top), cap_bottom(bottom))`. Taking the pair from a single
-    /// call makes the off-grid mistake — a cap opening closed with
-    /// [`Self::baseline_bottom`] — inexpressible.
+    /// call keeps the matching anchors together and reduces the chance of
+    /// closing a cap opening with [`Self::baseline_bottom`] by mistake.
     ///
     /// `None` when the font has no usable cap height. The baseline fallback
     /// is a design choice (the equivalent baseline count differs from `top`
@@ -804,7 +811,7 @@ impl RhythmFontSpec {
 /// A drop cap bound to the grid: the cap face at the size solved by
 /// [`FontRhythm::drop_cap`], plus the inset anchoring its baseline. Apply with
 /// [`RhythmStyled::rhythm_drop_cap`]; for wrap-around text, measure the letter
-/// with `shape_line` (see `drop_cap_paragraph` in the `demo` example).
+/// with `shape_line` (see `drop_cap_paragraph` in the `recipes` example).
 ///
 /// # Examples
 ///
@@ -986,13 +993,13 @@ pub fn rhythm_overlay(grid: RhythmGrid, color: impl Into<Hsla>) -> RhythmOverlay
 /// relative positioning by default, so no extra `.relative()` call is needed,
 /// and this element does not alter the container's position style.
 ///
-/// The stripes start at the container's top edge, or [`phase`](Self::phase)
-/// above it. If the content scrolls a container, put the overlay *inside* the
-/// scrolled wrapper so the grid moves with the text; a renderer that scrolls
-/// by painting content at a computed offset instead sets that offset as the
-/// phase. Either way only rows intersecting the visible region (the current
-/// content mask) are painted, and each is clipped to the overlay's own
-/// bounds, so covering a document far taller than the viewport costs
+/// The stripes start at the container's top edge. If the content scrolls a
+/// container, put the overlay *inside* the scrolled wrapper so the grid moves
+/// with the text; a renderer that scrolls by painting content at a computed
+/// signed Y offset instead passes that same offset to [`phase`](Self::phase).
+/// Either way only rows intersecting the visible region (the current content
+/// mask) are painted, and each is clipped to the overlay's own bounds, so
+/// covering a document far taller than the viewport costs
 /// `O(viewport height / grid size)` per frame and never paints outside the
 /// container it covers.
 #[derive(IntoElement)]
@@ -1003,14 +1010,15 @@ pub struct RhythmOverlay {
 }
 
 impl RhythmOverlay {
-    /// Anchor the stripes `offset` above the element's top edge, for
-    /// renderers that scroll by painting content at an offset instead of
-    /// moving a scroll container: pass the offset the content was painted
-    /// with and the grid stays glued to the document.
+    /// Translate the stripes by the same signed Y `offset` used to paint the
+    /// content, for renderers that scroll without moving a scroll container.
+    /// A negative offset moves both content and grid origin above the
+    /// element; a positive offset moves them below it. In particular,
+    /// `ScrollHandle::offset().y` can be passed through directly.
     ///
-    /// Equivalent to translating the overlay up by `offset` — without the
-    /// wrapper element, and without an ancestor to clip it, since stripes
-    /// are clipped to the overlay's own bounds.
+    /// This has the effect of translating the overlay with the content —
+    /// without a wrapper element, and without an ancestor to clip it, since
+    /// stripes are clipped to the overlay's own bounds.
     ///
     /// # Panics
     ///
@@ -1023,6 +1031,11 @@ impl RhythmOverlay {
         self.phase = offset;
         self
     }
+}
+
+#[inline]
+fn overlay_origin_y(element_top: Pixels, phase: Pixels) -> f32 {
+    f32::from(element_top) + f32::from(phase)
 }
 
 /// A bare grid converts to its default debug appearance — the classic
@@ -1044,9 +1057,9 @@ impl RenderOnce for RhythmOverlay {
                 if visible.size.height <= px(0.) || visible.size.width <= px(0.) {
                     return;
                 }
-                // The grid's origin row, which the phase lifts above the
-                // element's own top edge.
-                let origin_y = f32::from(bounds.origin.y) - f32::from(phase);
+                // Apply the same signed translation as the painted content so
+                // the grid origin stays attached to the document.
+                let origin_y = overlay_origin_y(bounds.origin.y, phase);
                 visible_stripes(
                     origin_y,
                     f32::from(grid.size()),
@@ -1070,13 +1083,13 @@ impl RenderOnce for RhythmOverlay {
 }
 
 /// The overlay's whole geometry: every other row of the grid rooted at
-/// `origin_y` — which a phase can lift above the element — reported to
+/// `origin_y` — including any signed content translation — reported to
 /// `paint` as `(from, to)` spans clipped to the visible `[top, bottom)`.
 ///
 /// Whole periods before the visible region are skipped arithmetically rather
 /// than walked, so an overlay over a document far taller than the viewport
 /// still costs `O(viewport height / stripe height)`, and the clipping keeps
-/// a phase-lifted first row (or an overhanging last one) inside the element.
+/// a translated first row (or an overhanging last one) inside the element.
 fn visible_stripes(
     origin_y: f32,
     stripe_height: f32,
@@ -1230,11 +1243,23 @@ mod tests {
     }
 
     #[test]
-    fn rhythm_overlay_keeps_the_requested_color() {
+    fn rhythm_overlay_keeps_the_requested_grid_and_color() {
+        let grid = RhythmGrid::new(px(10.0));
         let color: Hsla = rgba(0x0969da33).into();
-        let overlay = rhythm_overlay(RhythmGrid::new(px(8.0)), color);
+        let overlay = rhythm_overlay(grid, color);
+        assert_eq!(overlay.grid, grid);
         assert_eq!(overlay.color, color);
-        let factory = RhythmGrid::new(px(8.0)).overlay(color);
+        let mut spans = Vec::new();
+        visible_stripes(
+            0.0,
+            f32::from(overlay.grid.size()),
+            0.0,
+            45.0,
+            |from, to| spans.push((from, to)),
+        );
+        assert_eq!(spans, [(0.0, 10.0), (20.0, 30.0), (40.0, 45.0)]);
+        let factory = grid.overlay(color);
+        assert_eq!(factory.grid, grid);
         assert_eq!(factory.color, color);
         assert_eq!(factory.phase, px(0.));
     }
@@ -1411,19 +1436,47 @@ mod tests {
     }
 
     #[test]
-    fn overlay_phase_shifts_the_pattern_up_and_clips_the_lifted_row() {
-        // A phase of one rhythm unit lifts the grid origin to −8: the row
-        // that would open the element is gone and the pattern moves up.
-        assert_eq!(stripe_spans(-8.0, 0.0, 40.0), [(8.0, 16.0), (24.0, 32.0)]);
-        // Half a unit leaves the visible half of the lifted row, painted from
-        // the element's top edge — no ancestor clipping needed.
+    fn overlay_phase_uses_the_contents_signed_translation() {
+        let grid = RhythmGrid::new(px(8.0));
+
+        // GPUI scroll offsets become negative as content moves up. Passing
+        // that value through directly moves the overlay origin the same way:
+        // after one row the opening stripe is gone and the next starts at 8.
+        let one_row = rhythm_overlay(grid, rgba(0xff78783f)).phase(px(-8.0));
+        let one_row_origin = overlay_origin_y(px(0.0), one_row.phase);
+        assert_eq!(one_row_origin, -8.0);
         assert_eq!(
-            stripe_spans(-4.0, 0.0, 40.0),
+            stripe_spans(one_row_origin, 0.0, 40.0),
+            [(8.0, 16.0), (24.0, 32.0)]
+        );
+
+        // Half a row leaves the visible half of the translated stripe at the
+        // element's top edge — no ancestor clipping needed.
+        let half_row = rhythm_overlay(grid, rgba(0xff78783f)).phase(px(-4.0));
+        let half_row_origin = overlay_origin_y(px(0.0), half_row.phase);
+        assert_eq!(
+            stripe_spans(half_row_origin, 0.0, 40.0),
             [(0.0, 4.0), (12.0, 20.0), (28.0, 36.0)]
         );
-        // Deep into a scrolled document the phase is still exact, and only
-        // the visible period is walked.
-        assert_eq!(stripe_spans(-1600.0, 0.0, 24.0), [(0.0, 8.0), (16.0, 24.0)]);
+
+        // A positive content translation moves the document origin down and
+        // leaves the area before it unpainted.
+        let down = rhythm_overlay(grid, rgba(0xff78783f)).phase(px(4.0));
+        let down_origin = overlay_origin_y(px(0.0), down.phase);
+        assert_eq!(down_origin, 4.0);
+        assert_eq!(
+            stripe_spans(down_origin, 0.0, 24.0),
+            [(4.0, 12.0), (20.0, 24.0)]
+        );
+
+        // Deep into a scrolled document the signed phase is still exact, and
+        // only the visible period is walked.
+        let deep = rhythm_overlay(grid, rgba(0xff78783f)).phase(px(-1600.0));
+        let deep_origin = overlay_origin_y(px(0.0), deep.phase);
+        assert_eq!(
+            stripe_spans(deep_origin, 0.0, 24.0),
+            [(0.0, 8.0), (16.0, 24.0)]
+        );
     }
 
     #[test]
@@ -1507,6 +1560,19 @@ mod tests {
             invalid_font.weight = FontWeight(invalid);
             let result =
                 std::panic::catch_unwind(|| RhythmFontSpec::new(invalid_font, px(16.0), 3, grid));
+            assert!(result.is_err(), "accepted invalid font weight {invalid:?}");
+        }
+    }
+
+    #[test]
+    fn baseline_ratio_font_rejects_an_invalid_font_weight() {
+        let grid = RhythmGrid::new(px(8.0));
+        for invalid in [0.0, -0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let mut invalid_font = font("Example Serif");
+            invalid_font.weight = FontWeight(invalid);
+            let result = std::panic::catch_unwind(|| {
+                RhythmFont::from_baseline_ratio(invalid_font, px(16.0), 3, 0.2, grid)
+            });
             assert!(result.is_err(), "accepted invalid font weight {invalid:?}");
         }
     }
