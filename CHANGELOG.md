@@ -23,6 +23,12 @@ that guarded it — is gone from the new paths.
 - `Rhythm::spacing(n)` / `RhythmGrid::spacing(n)`: an axis-neutral rhythm-unit
   length for horizontal padding, gaps, and indents; `height(n)` remains the
   vertical name for the same calculation.
+- `RhythmStyled::rhythm_debug_overlay` now takes `impl Into<RhythmOverlay>`
+  instead of `RhythmGrid`. Passing the grid still compiles and keeps the
+  classic translucent red (`0xff78783f`); the new `grid.overlay(color)`
+  factory — optionally with `.phase(offset)` — customizes the stripes through
+  the same chainable toggle. `rhythm_overlay(grid, color)` remains the
+  explicit form.
 
 Media support — content whose height follows its width (images, video,
 embeds) no longer knocks everything after it off the grid:

@@ -30,7 +30,7 @@
 use std::sync::Arc;
 
 use gpui::{
-    div, font, point, prelude::*, px, rgb, size, App, Application, Bounds, Context, Element,
+    div, font, point, prelude::*, px, rgb, rgba, size, App, Application, Bounds, Context, Element,
     ElementId, Entity, Font, FontWeight, GlobalElementId, InspectorElementId, LayoutId, Pixels,
     Render, Style, TextAlign, TextRun, TextSystem, Window, WindowBounds, WindowOptions,
     WrappedLine,
@@ -349,7 +349,7 @@ impl Render for DirectPaint {
             .size_full()
             .bg(gpui::white())
             .child(DocumentElement { doc: cx.entity() })
-            .rhythm_debug_overlay(self.grid, true)
+            .rhythm_debug_overlay(self.grid.overlay(rgba(0x0969da33)), true)
     }
 }
 

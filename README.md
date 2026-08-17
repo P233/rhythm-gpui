@@ -144,10 +144,12 @@ The example is a recipe collection:
   slightly below the shared line — standard mixed-script behavior.
 - **Debug overlay** — chain `.rhythm_debug_overlay(grid, show)` on the page
   container to toggle the stripes while developing; every other grid row is
-  painted so you can verify baselines land on them. The underlying
-  `rhythm_overlay(grid, color)` element takes a custom color, and
-  `.phase(offset)` re-anchors the stripes for renderers that scroll by
-  painting content at a computed offset instead of moving a scroll container.
+  painted in the classic translucent red so you can verify baselines land on
+  them. The same toggle accepts a configured overlay in place of the grid:
+  `.rhythm_debug_overlay(grid.overlay(gpui::rgba(0x0969da33)), show)` picks
+  the grid color, and `.phase(offset)` on the overlay re-anchors the stripes
+  for renderers that scroll by painting content at a computed offset instead
+  of moving a scroll container.
 - **Device-pixel snapping** — the functions are exact to float precision
   (no whole-pixel rounding, unlike the Sass version); use `snap` to round a
   final value to whole device pixels. gpui rounds text line heights to whole

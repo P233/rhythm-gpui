@@ -8,6 +8,8 @@ use gpui::{
 
 use crate::{FontRhythm, Rhythm, RhythmBlockMetrics, RhythmLineMetrics};
 
+const DEFAULT_RHYTHM_OVERLAY_RGBA: u32 = 0xff78783f;
+
 fn assert_valid_font_request(font: &Font, font_size: Pixels, line_rhythms: u32) {
     assert!(
         font.weight.0.is_finite() && font.weight.0 > 0.0,
@@ -139,6 +141,14 @@ impl RhythmGrid {
         line_rhythms: u32,
     ) -> RhythmFont {
         RhythmFont::resolve(text_system, font, font_size, line_rhythms, *self)
+    }
+
+    /// A debug overlay on this grid in a custom `color` — [`rhythm_overlay`]
+    /// as a grid factory. Pass the result to
+    /// [`RhythmStyled::rhythm_debug_overlay`] in place of the bare grid to
+    /// customize the stripes without giving up the chainable toggle.
+    pub fn overlay(&self, color: impl Into<Hsla>) -> RhythmOverlay {
+        rhythm_overlay(*self, color)
     }
 
     /// Deprecated form of [`RhythmFont::baseline_top`].
@@ -917,16 +927,18 @@ pub trait RhythmStyled: Styled + Sized {
         self.rhythm_font(cap.font()).relative().top(cap.top())
     }
 
-    /// Paint the debug grid over this element while `show` is true, in the
-    /// classic translucent red (`0xff78783f`). Chain it after the content
-    /// children so the stripes paint on top; the element's top edge becomes
-    /// the grid origin, and the element's own position style is left
-    /// untouched. Use [`rhythm_overlay`] directly to pick a color.
+    /// Paint the debug grid over this element while `show` is true. Pass the
+    /// grid itself for the classic translucent red (`0xff78783f`), or
+    /// [`grid.overlay(color)`](RhythmGrid::overlay) — optionally with
+    /// [`phase`](RhythmOverlay::phase) — to customize the stripes through the
+    /// same chainable toggle. Chain it after the content children so the
+    /// stripes paint on top; the element's top edge becomes the grid origin,
+    /// and the element's own position style is left untouched.
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// use gpui::{div, prelude::*, px};
+    /// use gpui::{div, prelude::*, px, rgba};
     /// use rhythm_gpui::{RhythmGrid, RhythmStyled};
     ///
     /// fn page(show_grid: bool) -> impl IntoElement {
@@ -935,13 +947,20 @@ pub trait RhythmStyled: Styled + Sized {
     ///         .child("…content on the grid…")
     ///         .rhythm_debug_overlay(grid, show_grid)
     /// }
+    ///
+    /// fn tinted_page(show_grid: bool) -> impl IntoElement {
+    ///     let grid = RhythmGrid::new(px(8.));
+    ///     div()
+    ///         .child("…content on the grid…")
+    ///         .rhythm_debug_overlay(grid.overlay(rgba(0x0969da33)), show_grid)
+    /// }
     /// ```
-    fn rhythm_debug_overlay(self, grid: RhythmGrid, show: bool) -> Self
+    fn rhythm_debug_overlay(self, overlay: impl Into<RhythmOverlay>, show: bool) -> Self
     where
         Self: ParentElement,
     {
         if show {
-            self.child(rhythm_overlay(grid, rgba(0xff78783f)))
+            self.child(overlay.into())
         } else {
             self
         }
@@ -1003,6 +1022,15 @@ impl RhythmOverlay {
         );
         self.phase = offset;
         self
+    }
+}
+
+/// A bare grid converts to its default debug appearance — the classic
+/// translucent red (`0xff78783f`), zero phase — which is what lets
+/// [`RhythmStyled::rhythm_debug_overlay`] accept the grid directly.
+impl From<RhythmGrid> for RhythmOverlay {
+    fn from(grid: RhythmGrid) -> Self {
+        rhythm_overlay(grid, rgba(DEFAULT_RHYTHM_OVERLAY_RGBA))
     }
 }
 
@@ -1193,6 +1221,29 @@ mod tests {
         assert!(hidden.children.is_empty());
         let shown = CapturedChildren::default().rhythm_debug_overlay(grid, true);
         assert_eq!(shown.children.len(), 1);
+
+        let color = rgba(0x0969da33);
+        let hidden = CapturedChildren::default().rhythm_debug_overlay(grid.overlay(color), false);
+        assert!(hidden.children.is_empty());
+        let shown = CapturedChildren::default().rhythm_debug_overlay(grid.overlay(color), true);
+        assert_eq!(shown.children.len(), 1);
+    }
+
+    #[test]
+    fn rhythm_overlay_keeps_the_requested_color() {
+        let color: Hsla = rgba(0x0969da33).into();
+        let overlay = rhythm_overlay(RhythmGrid::new(px(8.0)), color);
+        assert_eq!(overlay.color, color);
+        let factory = RhythmGrid::new(px(8.0)).overlay(color);
+        assert_eq!(factory.color, color);
+        assert_eq!(factory.phase, px(0.));
+    }
+
+    #[test]
+    fn a_bare_grid_converts_to_the_default_red_overlay() {
+        let overlay = RhythmOverlay::from(RhythmGrid::new(px(8.0)));
+        assert_eq!(overlay.color, rgba(DEFAULT_RHYTHM_OVERLAY_RGBA).into());
+        assert_eq!(overlay.phase, px(0.));
     }
 
     #[test]
