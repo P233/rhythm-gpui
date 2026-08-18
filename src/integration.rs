@@ -23,6 +23,41 @@ fn assert_valid_font_request(font: &Font, font_size: Pixels, line_rhythms: u32) 
     assert!(line_rhythms > 0, "line_rhythms must be greater than zero");
 }
 
+/// Extract the above-baseline edge from a full-frame ideographic glyph.
+/// gpui's platform backends report glyph-space bounds with the origin at the
+/// ink bottom and positive height toward its top, so requiring the ink to
+/// straddle the alphabetic baseline rejects both unsuitable probes and gpui
+/// 0.2.2's Linux advance-only placeholder bounds.
+fn ideographic_ink_ascent(bounds: Bounds<Pixels>) -> Option<f32> {
+    let bottom = f32::from(bounds.origin.y);
+    let top = f32::from(bounds.origin.y + bounds.size.height);
+    (bottom.is_finite() && bottom < 0.0 && top.is_finite() && top > 0.0).then_some(top)
+}
+
+fn select_icf_ascent<E>(
+    bounds: impl IntoIterator<Item = Result<Bounds<Pixels>, E>>,
+) -> Result<f32, IcfMeasurementError> {
+    let mut saw_bounds = false;
+    let mut ascent: Option<f32> = None;
+
+    for bounds in bounds {
+        let Ok(bounds) = bounds else {
+            continue;
+        };
+        saw_bounds = true;
+
+        if let Some(candidate) = ideographic_ink_ascent(bounds) {
+            ascent = Some(ascent.map_or(candidate, |current| current.max(candidate)));
+        }
+    }
+
+    match ascent {
+        Some(ascent) => Ok(ascent),
+        None if saw_bounds => Err(IcfMeasurementError::NoUsableBounds),
+        None => Err(IcfMeasurementError::NoProbeBounds),
+    }
+}
+
 /// The vertical rhythm grid in gpui units.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RhythmGrid {
@@ -340,11 +375,13 @@ impl RhythmBlockMetrics {
 ///
 /// # Lifecycle
 ///
-/// A `RhythmFont` is an immutable resolved value, and only [`Self::resolve`]
-/// (with the factories built on it) touches gpui's `TextSystem`: metric and
-/// spacing methods afterwards are pure geometry on the stored values,
-/// allocation-free and lock-free, while style application reuses the stored
-/// [`Font`] without querying the text system. Register each font family
+/// A `RhythmFont` is an immutable resolved value. [`Self::resolve`] touches
+/// gpui's `TextSystem`; optional ideographic-character-face measurement reads
+/// it separately through [`Self::measure_icf`] and returns a
+/// [`RhythmIcfAnchor`] without changing this value. Metric and spacing methods
+/// are pure geometry on the stored values, allocation-free and lock-free,
+/// while style application reuses the stored [`Font`] without querying the
+/// text system. Register each font family
 /// (`TextSystem::add_fonts`) *before its first resolution*: gpui caches failed
 /// lookups by [`Font`], so adding a family later and clearing a caller-owned
 /// cache does not repair that miss in the same `TextSystem`. Resolution
@@ -360,6 +397,99 @@ pub struct RhythmFont {
     font_id: Option<FontId>,
     metrics: FontRhythm,
     grid: RhythmGrid,
+}
+
+/// Why an ideographic character-face measurement could not produce an anchor.
+///
+/// The variants describe what was observable through gpui's public API, not a
+/// guessed platform cause. A backend may still substitute a missing glyph —
+/// DirectWrite returns `.notdef` in gpui 0.2.2 — so successful measurement also
+/// depends on supplying probes covered by the resolved face.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum IcfMeasurementError {
+    /// The [`RhythmFont`] was synthesized without a gpui [`TextSystem`] and
+    /// therefore has no resolved [`FontId`] to measure.
+    UnresolvedFont,
+    /// The probe string was empty.
+    EmptyProbes,
+    /// gpui returned an error instead of bounds for every probe.
+    ///
+    /// On gpui 0.2.2's CoreText and Linux backends, this is the result when the
+    /// resolved face covers none of the supplied characters. Other backend
+    /// errors can produce the same observable result.
+    NoProbeBounds,
+    /// At least one probe returned bounds, but none were finite and spanned the
+    /// alphabetic baseline.
+    ///
+    /// This rejects both unsuitable glyphs and gpui 0.2.2's Linux
+    /// advance-only placeholder bounds.
+    NoUsableBounds,
+}
+
+impl std::fmt::Display for IcfMeasurementError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::UnresolvedFont => "the rhythm font has no TextSystem-resolved font identity",
+            Self::EmptyProbes => "no ICF probe glyphs were supplied",
+            Self::NoProbeBounds => "the text backend returned no bounds for any ICF probe",
+            Self::NoUsableBounds => {
+                "probe bounds were returned, but none described usable glyph ink"
+            }
+        })
+    }
+}
+
+impl std::error::Error for IcfMeasurementError {}
+
+/// A measured ideographic character-face anchor bound to the exact
+/// [`RhythmFont`] it was measured from.
+///
+/// This capability exists only after successful [`RhythmFont::measure_icf`],
+/// so its spacing operations are infallible and its ascent cannot be paired
+/// with a different face, size, or rhythm grid. Cap height, when present,
+/// arrives with a resolved [`RhythmFont`] and therefore exposes
+/// [`RhythmFont::cap_span`] there; an ICF ascent depends on caller-selected
+/// probes, which is why its `span` lives on this measured capability instead.
+#[derive(Debug, Clone)]
+pub struct RhythmIcfAnchor {
+    font: RhythmFont,
+    ascent: Pixels,
+}
+
+impl RhythmIcfAnchor {
+    /// The resolved font this anchor was measured from.
+    #[inline]
+    pub const fn font(&self) -> &RhythmFont {
+        &self.font
+    }
+
+    /// The paired ideographic-ink opening and closing.
+    ///
+    /// The opening lands the character face's top edge on the `top`th grid
+    /// line. The closing hands the trimmed band back so the block still spans
+    /// whole rhythm rows for any number of wrapped lines.
+    ///
+    /// A renderer that already has a trusted character-face ascent — or cannot
+    /// measure one through gpui — can call [`RhythmBlockMetrics::cap`] directly;
+    /// its anchored-ink scalar is generic despite the historical name.
+    #[inline]
+    pub fn span(&self, top: i32, bottom: i32) -> (Pixels, Pixels) {
+        let block = RhythmBlockMetrics::cap(
+            self.font.line_metrics(),
+            f32::from(self.ascent),
+            top,
+            bottom,
+        );
+        (px(block.opening()), px(block.closing()))
+    }
+
+    /// The invisible band between the line box's top edge and the measured
+    /// ideographic character face.
+    #[inline]
+    pub fn trim_top(&self) -> Pixels {
+        self.font.baseline_above() - self.ascent
+    }
 }
 
 impl RhythmFont {
@@ -443,6 +573,69 @@ impl RhythmFont {
             ),
             grid,
         }
+    }
+
+    /// Measure an ideographic character-face anchor from this resolved font.
+    ///
+    /// The result owns a clone of this font together with the tallest ink over
+    /// `probes`, which should be full-frame glyphs of the script being set
+    /// (`"字永語国"` for han, `"곽뻠한"` for hangul). Bounds that do not
+    /// straddle the alphabetic baseline are ignored because they cannot
+    /// establish that full frame. Only the returned [`RhythmIcfAnchor`] exposes
+    /// the infallible [`RhythmIcfAnchor::span`] and
+    /// [`RhythmIcfAnchor::trim_top`] operations.
+    ///
+    /// Measuring beats reading the font's `BASE` table. `BASE` is absent from
+    /// some faces (SimSong ships none), and where present its `icft` is a
+    /// *declaration* the ink need not match: measured against their own
+    /// tables, PingFang SC and Toppan Bunkyu Gothic agree within 0.003 em, but
+    /// Apple SD Gothic Neo's hangul overshoots its declared `icft` by
+    /// 0.054 em. A measurement adapts to the face and the script; a table
+    /// lookup does not.
+    ///
+    /// Like a cap anchor, this anchors *one* ink envelope: glyphs that reach
+    /// it land on the grid line and shorter ones sit below, exactly as Latin
+    /// lowercase sits below a `cap_top` anchor. Kana are the case to know
+    /// about — their dakuten ride 0.005–0.058 em above the han envelope, like
+    /// Latin ascenders above cap height — so include kana in `probes` when
+    /// setting Japanese that must not exceed the line.
+    ///
+    /// Measurement happens only at this boundary; spacing on a successful
+    /// anchor stays pure geometry. Use the same [`TextSystem`] that resolved
+    /// this font because its [`FontId`] is local to that text system. The base
+    /// `RhythmFont` remains determined entirely by [`Self::spec`] and is safe to
+    /// cache normally. Cache a measured anchor separately only when useful,
+    /// keyed by both the spec and probes.
+    ///
+    /// Availability follows gpui's text backend. In gpui 0.2.2, CoreText and
+    /// DirectWrite expose glyph ink bounds, while Linux returns advance-only
+    /// placeholder bounds that produce [`IcfMeasurementError::NoUsableBounds`].
+    /// When every bounds query fails instead, this returns
+    /// [`IcfMeasurementError::NoProbeBounds`]. If failures and rejected bounds
+    /// are mixed, the returned-bounds distinction wins and the result is
+    /// `NoUsableBounds`. Probe with glyphs the resolved face actually covers:
+    /// CoreText and Linux report a missing glyph as absent, while DirectWrite
+    /// substitutes `.notdef`, whose box can pass for ink.
+    pub fn measure_icf(
+        &self,
+        text_system: &TextSystem,
+        probes: &str,
+    ) -> Result<RhythmIcfAnchor, IcfMeasurementError> {
+        let font_id = self.font_id.ok_or(IcfMeasurementError::UnresolvedFont)?;
+        if probes.is_empty() {
+            return Err(IcfMeasurementError::EmptyProbes);
+        }
+        let font_size = self.font_size();
+        let ascent = select_icf_ascent(
+            probes
+                .chars()
+                .map(|ch| text_system.typographic_bounds(font_id, font_size, ch)),
+        )?;
+
+        Ok(RhythmIcfAnchor {
+            font: self.clone(),
+            ascent: px(ascent),
+        })
     }
 
     /// The requested gpui font configuration applied by
@@ -549,6 +742,10 @@ impl RhythmFont {
     /// with [`Self::cap_bottom`], not [`Self::baseline_bottom`]; see
     /// [`Rhythm::cap_top`] for the contract, or use [`Self::cap_span`] to get
     /// the pair in one call. `None` when the font has no usable cap height.
+    ///
+    /// CJK faces usually resolve with a cap height — for their embedded Latin
+    /// glyphs — so on ideographic text this returns `Some` while trimming to
+    /// the wrong ink; use [`Self::measure_icf`] for CJK openings.
     #[inline]
     pub fn cap_top(&self, n: i32) -> Option<Pixels> {
         self.grid.rhythm().cap_top(&self.metrics, n).map(px)
@@ -1397,6 +1594,14 @@ mod tests {
         assert_eq!(Some(pb), heading.cap_bottom(0));
         let rows = f32::from(pt + heading.line_height() + pb) / 8.0;
         assert!((rows - rows.round()).abs() < 1e-3);
+
+        // `cap_span` composes the `Rhythm` anchors while the ICF anchor goes
+        // through the block metrics; pinning both to the same value keeps the
+        // two ink-anchor paths from drifting apart.
+        let line = metrics.line_metrics(grid.rhythm());
+        let block = RhythmBlockMetrics::cap(line, metrics.cap_height().expect("cap height"), 3, 0);
+        assert!((f32::from(pt) - block.opening()).abs() < 1e-4);
+        assert!((f32::from(pb) - block.closing()).abs() < 1e-4);
     }
 
     #[test]
@@ -1407,6 +1612,94 @@ mod tests {
         assert_eq!(font.cap_top(3), None);
         assert_eq!(font.cap_bottom(1), None);
         assert_eq!(font.cap_span(3, 1), None);
+    }
+
+    /// PingFang SC at 16px on a 3-unit line — hhea 1.060/-0.340, with an OS/2
+    /// cap of 0.860 that is a placeholder copy of `sTypoAscender` rather than
+    /// its Latin `H` — carrying the ICF ascent that
+    /// [`RhythmFont::measure_icf`] would have measured.
+    const PINGFANG_ICF_16: f32 = 0.822 * 16.0;
+
+    fn pingfang_icf_16(grid: RhythmGrid) -> RhythmIcfAnchor {
+        RhythmIcfAnchor {
+            font: RhythmFont {
+                font: font("Example CJK"),
+                font_id: None,
+                metrics: FontRhythm::from_platform_metrics(16.0, 3, 16.96, -5.44, 13.76, 9.6),
+                grid,
+            },
+            ascent: px(PINGFANG_ICF_16),
+        }
+    }
+
+    #[test]
+    fn icf_anchor_pairs_the_anchors_and_spans_whole_rows() {
+        let grid = RhythmGrid::new(px(8.0));
+        let anchor = pingfang_icf_16(grid);
+        let body = anchor.font();
+
+        let (pt, pb) = anchor.span(3, 0);
+        let trim = anchor.trim_top();
+        assert_eq!(pt, grid.height(3) - trim);
+        assert_eq!(pb, trim);
+        // The character face's top edge lands on the third grid line…
+        assert_eq!(pt + trim, grid.height(3));
+        // …and the pair still spans whole rhythm rows.
+        let rows = f32::from(pt + body.line_height() + pb) / 8.0;
+        assert!((rows - rows.round()).abs() < 1e-3);
+        // The reported cap height anchors somewhere else entirely.
+        assert_ne!(body.cap_top(3), Some(pt));
+    }
+
+    #[test]
+    fn icf_anchor_agrees_with_the_generic_block_metrics() {
+        // The gpui pair is a convenience over a capability the math layer
+        // already has; if these ever disagree, one of them is wrong.
+        let grid = RhythmGrid::new(px(8.0));
+        let anchor = pingfang_icf_16(grid);
+        let body = anchor.font();
+
+        let (pt, pb) = anchor.span(3, 0);
+        let line = body.metrics().line_metrics(grid.rhythm());
+        let block = RhythmBlockMetrics::cap(line, PINGFANG_ICF_16, 3, 0);
+        assert!((f32::from(pt) - block.opening()).abs() < 1e-4);
+        assert!((f32::from(pb) - block.closing()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn icf_measurement_rejects_advance_only_placeholder_bounds() {
+        let real_ink = Bounds {
+            origin: point(px(0.0), px(-1.6)),
+            size: size(px(16.0), px(14.8)),
+        };
+        assert!((ideographic_ink_ascent(real_ink).unwrap() - 13.2).abs() < 1e-4);
+
+        // gpui 0.2.2's Linux backend currently returns an advance rectangle
+        // rooted at zero instead of glyph ink bounds. A nonzero vertical
+        // advance must not become a plausible-looking ICF ascent.
+        let advance_only = Bounds {
+            origin: point(px(0.0), px(0.0)),
+            size: size(px(16.0), px(16.0)),
+        };
+        assert_eq!(ideographic_ink_ascent(advance_only), None);
+
+        assert_eq!(
+            select_icf_ascent([Err::<Bounds<Pixels>, ()>(())]),
+            Err(IcfMeasurementError::NoProbeBounds)
+        );
+        assert_eq!(
+            select_icf_ascent([Ok::<Bounds<Pixels>, ()>(advance_only)]),
+            Err(IcfMeasurementError::NoUsableBounds)
+        );
+        assert_eq!(
+            select_icf_ascent([Err(()), Ok(advance_only)]),
+            Err(IcfMeasurementError::NoUsableBounds),
+            "a returned-but-rejected bound wins over failed probe queries"
+        );
+        assert!(
+            (select_icf_ascent([Err(()), Ok(real_ink)]).unwrap() - 13.2).abs() < 1e-4,
+            "one usable probe makes the aggregate measurement succeed"
+        );
     }
 
     #[test]

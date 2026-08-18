@@ -108,7 +108,18 @@ impl Rhythm {
     /// [`Self::baseline_bottom`] — so it still occupies a whole number of
     /// rhythm rows and everything after it stays in rhythm.
     ///
-    /// `None` when `font` has no usable cap height.
+    /// `None` when `font` has no usable cap height. CJK faces report one
+    /// anyway, so on ideographic text this anchor returns `Some` while
+    /// trimming to the wrong ink: ideographs are not seated on the baseline,
+    /// and the envelope their ink is drawn to is the ideographic character
+    /// face, not a cap height. Anchor those with
+    /// [`RhythmBlockMetrics::cap`](crate::RhythmBlockMetrics::cap), whose ink
+    /// scalar is generic, or with `RhythmIcfAnchor::span` under the `gpui`
+    /// feature. Worse, the reported value need not describe any glyph:
+    /// PingFang SC publishes `sCapHeight` 0.860 em, a copy of its
+    /// `sTypoAscender`, while its Latin `H` actually reaches 0.714 em
+    /// (Hiragino Sans GB, by contrast, reports its true 0.766 em). Treat a
+    /// CJK face's cap and x heights as unverified.
     ///
     /// # Examples
     ///
@@ -417,6 +428,11 @@ impl FontRhythm {
     /// [`DropCapRhythm::top`] anchors the baseline there. A face without a
     /// usable cap height falls back to the classic 0.7 em approximation, which
     /// can only misplace the visual top — the baseline anchor stays exact.
+    ///
+    /// Drop caps are a Latin convention; CJK paragraphs conventionally open
+    /// with a first-line indent instead, so there is deliberately no
+    /// ideographic dual of this solver. A CJK face passed as `cap` is solved
+    /// from its reported (Latin-glyph) cap height like any other face.
     ///
     /// # Examples
     ///
@@ -814,5 +830,98 @@ mod tests {
         let from_setters = font_map_3().with_cap_height(f32::NAN).with_x_height(0.0);
         assert_eq!(from_setters.cap_height(), None);
         assert_eq!(from_setters.x_height(), None);
+    }
+
+    // PingFang SC Regular, read from the font file: upem 1000, hhea
+    // 1060/-340, BASE icfb -102 / icft +822, OS/2 sCapHeight 860 and sxHeight
+    // 600. Those last two are placeholders, not measurements — sCapHeight
+    // simply repeats sTypoAscender, while the face's real H reaches 0.714 em
+    // and its x 0.517 em. The fixtures keep the reported values because they
+    // are what a text system hands back.
+    const PINGFANG_ICFT: f32 = 0.822;
+
+    fn pingfang(size: f32, rows: u32) -> FontRhythm {
+        FontRhythm::from_platform_metrics(
+            size,
+            rows,
+            1.060 * size,
+            -0.340 * size,
+            0.860 * size,
+            0.600 * size,
+        )
+    }
+
+    /// The math layer needs no ideographic anchor of its own:
+    /// [`RhythmBlockMetrics::cap`] already takes the anchored ink height as a
+    /// generic scalar, so passing a character-face ascent instead of a cap
+    /// height lands ideographic ink and still spans whole rows.
+    #[test]
+    fn ideographic_ink_anchors_through_the_generic_block_metrics() {
+        let font = pingfang(16.0, 3);
+        let icf = PINGFANG_ICFT * 16.0;
+        let line = font.line_metrics(GRID);
+        let block = crate::RhythmBlockMetrics::cap(line, icf, 3, 0);
+
+        // The character face's top edge starts exactly on the 3rd grid line…
+        let trim = font.baseline_above(GRID) - icf;
+        assert!((block.opening() + trim - GRID.height(3)).abs() < 1e-3);
+        // …and the paired closer makes the block a whole number of rows.
+        assert!((block.height(1) - 48.0).abs() < 1e-3);
+        assert_eq!(block.rows(1), 6);
+
+        // Closing with a baseline anchor instead would leave the fractional
+        // character-face phase inside the block.
+        let mixed = block.opening() + font.line_height(GRID) + GRID.baseline_bottom(&font, 1);
+        let rows = mixed / GRID.size();
+        assert!((rows - rows.round()).abs() > 0.01);
+    }
+
+    #[test]
+    fn a_cjk_faces_cap_height_is_the_wrong_ink() {
+        // Two hazards at once. The reported cap height anchors Latin ink that
+        // ideographs do not share, and PingFang's reported value (0.860 em,
+        // a copy of sTypoAscender) describes no glyph at all — its real H is
+        // 0.714 em. Meanwhile the em box top, 0.86 em, sits above every
+        // ideograph's ink (字 reaches +0.825 em), so anchoring the box leaves
+        // a visible gap where the character face does not.
+        let font = pingfang(16.0, 3);
+        let icf = PINGFANG_ICFT * 16.0;
+        let ink_top = 0.825 * 16.0;
+
+        let cap_anchor = GRID.cap_top(&font, 3).unwrap();
+        let face_anchor =
+            crate::RhythmBlockMetrics::cap(font.line_metrics(GRID), icf, 3, 0).opening();
+        assert!(
+            face_anchor < cap_anchor,
+            "the character face sits above the reported cap height"
+        );
+
+        // The face anchor puts real ink within a fraction of a pixel of the
+        // grid line; an em-box anchor is a visible distance short of it.
+        assert!((icf - ink_top).abs() < 0.06);
+        assert!(0.86 * 16.0 - ink_top > 0.5);
+    }
+
+    /// Pins the worked example in README.md's CJK section.
+    #[test]
+    fn readme_heading_flush_to_a_card_edge() {
+        // PingFang SC 24px on a 5-unit (40px) line, 8px grid.
+        let heading = pingfang(24.0, 5);
+        let icf = PINGFANG_ICFT * 24.0;
+        let trim = heading.baseline_above(GRID) - icf;
+        assert!((trim - 8.912).abs() < 1e-3, "invisible space, got {trim}");
+
+        // The naive padding overshoots by that whole invisible band.
+        assert!((16.0 + trim - 24.912).abs() < 1e-3);
+
+        // The anchored pair lands the ink and still spans whole rows.
+        let block = crate::RhythmBlockMetrics::cap(heading.line_metrics(GRID), icf, 2, 0);
+        assert!((block.opening() - 7.088).abs() < 1e-3);
+        assert!((block.opening() + trim - 16.0).abs() < 1e-3);
+        assert!((block.height(1) - 56.0).abs() < 1e-3);
+        assert_eq!(block.rows(1), 7);
+
+        // The cap anchor misses by PingFang's reported cap height.
+        assert!((GRID.cap_top(&heading, 2).unwrap() + trim - 16.912).abs() < 1e-3);
     }
 }

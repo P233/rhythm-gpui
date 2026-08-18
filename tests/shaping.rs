@@ -27,7 +27,9 @@ mod suite {
         font, px, size, App, AppContext, Application, Bounds, Context, Font, FontStyle, FontWeight,
         IntoElement, Render, TextRun, Window, WindowBounds, WindowOptions, WrappedLine,
     };
-    use rhythm_gpui::{RhythmFontSpec, RhythmGrid, RhythmLineMetrics};
+    use rhythm_gpui::{
+        IcfMeasurementError, RhythmFont, RhythmFontSpec, RhythmGrid, RhythmLineMetrics,
+    };
 
     const FONT_SIZE: f32 = 16.0;
     const TOLERANCE: f32 = 0.02;
@@ -354,6 +356,134 @@ mod suite {
         }
     }
 
+    /// Group 6: can the ideographic character face be *measured* through
+    /// gpui, instead of being hand-copied from the font's `BASE` table?
+    ///
+    /// `TextSystem::typographic_bounds` reports per-glyph ink, so the answer
+    /// decides whether ICF anchoring needs a caller-supplied constant at all.
+    /// Ground truth from PingFang SC's own tables (fonttools, em units above
+    /// the baseline): `icft` +0.822, `icfb` −0.102, with 字 +0.825/−0.096,
+    /// 永 +0.821/−0.101, 語 +0.823/−0.102 — and 国 only +0.771, which is why
+    /// a probe set needs several full-frame glyphs rather than one.
+    fn ideographic_ink(cx: &mut App) {
+        let text_system = cx.text_system();
+        let size = px(FONT_SIZE);
+        let grid = RhythmGrid::new(px(8.));
+
+        // CoreText maps glyph 0 to `None` before asking for typographic bounds.
+        // The bundled Latin-only face makes that backend contract independent
+        // of system-font availability: every CJK probe must fail lookup, which
+        // the public measurement boundary preserves as `NoProbeBounds`.
+        let latin = grid.font(text_system, font("Noto Serif"), size, 3);
+        assert_eq!(
+            latin.measure_icf(text_system, "字永語国").unwrap_err(),
+            IcfMeasurementError::NoProbeBounds
+        );
+
+        if !text_system
+            .all_font_names()
+            .iter()
+            .any(|name| name == "PingFang SC")
+        {
+            println!("  (ideographic ink group skipped: PingFang SC unavailable)");
+            return;
+        }
+        let font_id = text_system.resolve_font(&font("PingFang SC"));
+
+        let mut ink_top = f32::MIN;
+        let mut ink_bottom = f32::MAX;
+        for ch in ['字', '永', '語', '国'] {
+            let bounds = text_system
+                .typographic_bounds(font_id, size, ch)
+                .unwrap_or_else(|e| panic!("typographic bounds for {ch}: {e}"));
+            // gpui preserves CoreText's glyph-space rectangle: origin.y is
+            // the ink bottom and origin.y + height is its top.
+            let bottom = f32::from(bounds.origin.y);
+            let top = f32::from(bounds.origin.y + bounds.size.height);
+            println!(
+                "  {ch}: top {:+.4} em, bottom {:+.4} em",
+                top / FONT_SIZE,
+                bottom / FONT_SIZE
+            );
+            ink_top = ink_top.max(top);
+            ink_bottom = ink_bottom.min(bottom);
+        }
+
+        let icft = ink_top / FONT_SIZE;
+        let icfb = ink_bottom / FONT_SIZE;
+        assert!(
+            (icft - 0.822).abs() < 0.01,
+            "measured ICF top {icft:+.4} em should match PingFang's icft +0.822"
+        );
+        assert!(
+            (icfb + 0.102).abs() < 0.01,
+            "measured ICF bottom {icfb:+.4} em should match PingFang's icfb −0.102"
+        );
+
+        // The public path must agree with the raw probe, and anchor on it.
+        let heading = grid.font(text_system, font("PingFang SC"), size, 3);
+        let anchor = heading
+            .measure_icf(text_system, "字永語国")
+            .expect("measuring a resolved face yields an ICF anchor");
+        assert_eq!(
+            anchor.font().spec(),
+            heading.spec(),
+            "measurement must preserve the resolved font identity"
+        );
+        let trim = anchor.trim_top();
+        assert_close(
+            f32::from(anchor.font().baseline_above() - trim),
+            ink_top,
+            "measure_icf should store the tallest probe ink in the anchor",
+        );
+        let (pt, pb) = anchor.span(3, 0);
+        assert_close(
+            f32::from(pt + trim),
+            f32::from(grid.height(3)),
+            "the ICF span must land the measured ink on the grid line",
+        );
+        let rows = f32::from(pt + anchor.font().line_height() + pb) / 8.0;
+        assert_close(rows, rows.round(), "the ICF pair must span whole rows");
+
+        // Measurement does not mutate the resolved font or a previous anchor.
+        // A failed independent attempt reports the failure at this boundary.
+        let unavailable = heading.measure_icf(text_system, "").unwrap_err();
+        assert_eq!(unavailable, IcfMeasurementError::EmptyProbes);
+        assert_eq!(anchor.span(3, 0), (pt, pb));
+
+        let synthetic = RhythmFont::from_baseline_ratio(font("PingFang SC"), size, 3, 0.2, grid);
+        assert_eq!(
+            synthetic.measure_icf(text_system, "字").unwrap_err(),
+            IcfMeasurementError::UnresolvedFont
+        );
+
+        // Scripts whose ink is not bounded by the han envelope: kana ride
+        // above it, exactly as Latin ascenders ride above cap height. A
+        // Japanese setting therefore probes kana too.
+        let japanese = grid.font(text_system, font("PingFang SC"), size, 3);
+        let with_kana = japanese
+            .measure_icf(text_system, "字永語国ぱポ")
+            .expect("kana probes resolve");
+        let kana_trim = with_kana.trim_top();
+        assert!(
+            kana_trim < trim,
+            "adding kana should raise the measured envelope, not lower it"
+        );
+
+        // A face with no BASE table at all still measures: the whole point of
+        // preferring measurement to a table lookup.
+        if text_system
+            .all_font_names()
+            .iter()
+            .any(|name| name == "SimSong")
+        {
+            let simsong = grid.font(text_system, font("SimSong"), size, 3);
+            simsong
+                .measure_icf(text_system, "字永語国")
+                .expect("measurement must work without a BASE table");
+        }
+    }
+
     pub fn run() {
         let dir = fonts_dir();
         if !dir.join("NotoSerif-Regular.ttf").exists() {
@@ -395,6 +525,7 @@ mod suite {
                     glyph_fallback(window);
                     overflow(window);
                     covering_budget(window);
+                    ideographic_ink(cx);
                     cx.new(|_| TestView)
                 },
             )
@@ -403,7 +534,7 @@ mod suite {
             // `run`, so report success before it.
             println!(
                 "shaping suite passed: single-run, mixed-run max, glyph fallback, \
-                 overflow, covering budget"
+                 overflow, covering budget, ideographic ink"
             );
             cx.quit();
         });

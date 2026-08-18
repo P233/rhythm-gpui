@@ -151,6 +151,15 @@ The example is a recipe collection:
   aligned on one grid-seated alphabetic baseline. CJK fonts publish the same
   metrics, but ideographs are drawn on the em square, so their ink dips
   slightly below the shared line — standard mixed-script behavior.
+- **CJK ink anchor** — twin cards asking for the same thing (ink two rhythm
+  units below the card's top edge) with the target drawn as a rule: naive
+  `.pt()` misses it by the whole invisible band, a measured
+  `RhythmIcfAnchor::span` lands on it. Every edge is a grid citizen — the block
+  opens on a grid line, both captions are whole-row rhythm blocks, and each
+  card is nine rows tall — so the target rule _is_ a grid line and the overlay
+  confirms the claim instead of the caption asserting it. Ordinary Chinese
+  paragraphs need no CJK-specific API and the example does not pretend
+  otherwise.
 - **Debug overlay** — chain `.rhythm_debug_overlay(grid, show)` on the page
   container, after its content children so the stripes paint on top (gpui
   paints later siblings over earlier ones), to toggle the grid while
@@ -170,6 +179,132 @@ The example is a recipe collection:
   device-pixel boundaries. Keep `grid × line_rhythms` whole when the value may
   flow through the rounded helper; independently, each final fractional layout
   edge can differ from the exact math by up to half a device pixel.
+
+## CJK (horizontal layout)
+
+**Most CJK typography needs nothing from this section.** Horizontal CJK seats
+its glyphs on the same alphabetic baseline Latin uses, and CJK fonts publish
+the same `ascent`/`descent`, so `baseline_top` / `baseline_between` /
+`rhythm_block` land Chinese, Japanese and Korean on the grid exactly as they
+land English. Mixed script usually needs nothing either: a CJK face ships its
+own Latin, sized by the same designer to sit with the ideographs — measured,
+PingFang SC draws `H` at 0.714 em against its 0.924 em character face — so
+setting both scripts in one family is balanced without any compensation.
+
+One thing baseline anchoring cannot do is land ideographic **ink** on a grid
+line or a container edge, and that is all the CJK API here is for.
+
+### Why an ink anchor needs a different metric
+
+Latin letters are _seated on_ the baseline — the bottom of x, o, n is the
+baseline — which is what lets `cap_top` land visible ink. Ideographs are not:
+the baseline merely crosses their design frames, and per-glyph ink varies
+wildly inside them (一 is a stroke near the middle, 国 nearly fills the frame,
+汉 reaches below the baseline). So a CJK ink anchor targets a frame, and which
+frame decides whether ink actually lands. Measured from the font files:
+
+| face                 | ICF `icfb` … `icft` | em box (`ideo`, OS/2 typo) | real ink        |
+| -------------------- | ------------------- | -------------------------- | --------------- |
+| PingFang SC          | −0.102 … **+0.822** | −0.14 … +0.86              | 字 **+0.825**   |
+| Toppan Bunkyu Gothic | −0.080 … **+0.840** | —                          | 漢字 **+0.842** |
+| Apple SD Gothic Neo  | −0.150 … **+0.750** | —                          | 한글 **+0.804** |
+
+The **ICF** (ideographic character face) is the envelope full-frame glyphs are
+drawn to; the **em box** is the 1 em advance body, which sits ~0.03 em above
+_any_ ink, so anchoring it always leaves a visible gap. Anchor the ICF, as CSS
+`text-box-edge: ideographic-ink` does. And note the third row: a face's
+declared `icft` is not always honest, which is why this crate measures rather
+than reads it.
+
+### Measuring the character face
+
+```rust
+let heading = grid.font(cx.text_system(), font("PingFang SC"), px(24.), 5);
+
+if let Ok(anchor) = heading.measure_icf(cx.text_system(), "字永語国") {
+    let (pt, pb) = anchor.span(2, 0);
+    div()
+        .pt(pt)
+        .pb(pb)
+        .rhythm_font(anchor.font())
+        .child("中文标题");
+}
+```
+
+`measure_icf` takes the tallest ink over the probe glyphs, so pass a _set_ of
+full-frame glyphs for the script you are setting — 国 alone stops 0.05 em short
+of what 字 reaches. Measuring beats reading the font's `BASE` table: SimSong
+ships none at all, and Apple SD Gothic Neo's hangul overshoots its declared
+`icft` by 0.054 em.
+
+Measurement returns a `RhythmIcfAnchor` bound to the exact resolved font, size,
+and grid it measured. The base `RhythmFont` remains entirely determined by its
+`RhythmFontSpec`, so cache it normally; cache an anchor separately only when
+useful, keyed by both the spec and probes. Failure occurs once at
+`measure_icf`; a successful anchor's `span` and `trim_top` are infallible pure
+geometry.
+
+The error variants preserve what gpui made observable. Empty input returns
+`EmptyProbes`; when every probe-bound query fails, measurement returns
+`NoProbeBounds`; when at least one query returns bounds but every bound is
+rejected, it returns `NoUsableBounds`. If failed queries and rejected bounds
+are mixed, `NoUsableBounds` wins. In gpui 0.2.2, CoreText and Linux report a
+missing glyph as absent, while Linux returns advance-only placeholder bounds
+for covered glyphs, so its unsupported ink measurement takes the latter path.
+DirectWrite instead substitutes `.notdef` for a missing glyph, whose box can
+pass for ink; probe with glyphs the resolved face actually covers. Always use
+the same `TextSystem` for measurement that resolved the `RhythmFont`.
+
+When a renderer already has a trusted character-face ascent, or its backend
+cannot measure one, call `RhythmBlockMetrics::cap` directly. Its ink scalar is
+generic despite the historical name: passing an ICF ascent produces the same
+opening, closing, row, and fragment geometry without adding measured state to
+`RhythmFont` or depending on gpui.
+
+Like a cap anchor, this anchors **one** ink envelope: glyphs that reach it land
+on the line, shorter ones sit below — exactly as Latin lowercase sits below a
+`cap_top` anchor. Kana are the case to know about: their dakuten ride
+0.005–0.058 em above the han envelope, like Latin ascenders above cap height,
+so include kana in the probes when setting Japanese that must not exceed the
+line.
+
+### Worked example: a heading flush to a card edge
+
+You want the _ink_ of that 24px heading to start two rhythm units (16px) below
+a card's top edge. Inside its 40px line box, 8.91px above the ink is invisible
+— 3.2px of half-leading plus 5.71px from the ascent down to the character
+face. So `.pt(px(16.))` puts the ink at **24.91px**: you asked for 16 and the
+eye sees nearly 25, more than a whole rhythm unit out, and the error changes
+with every size and face. `anchor.span(2, 0)` returns 7.088px and 8.912px
+instead — subtracting the invisible band at the top and handing it back at the
+bottom, so the ink lands at 16.00px and the block is still 56px = 7 whole rows.
+
+This is the same problem CSS added `text-box-trim` for, and the same one
+`cap_top` already solves for Latin; `RhythmIcfAnchor::span` is its CJK
+counterpart. Their shapes differ intentionally: a cap height, when present,
+arrives with the metrics resolved into `RhythmFont`, so `cap_span` lives on the
+font. An ICF ascent depends on backend measurement and caller-selected probes,
+so only a successfully measured `RhythmIcfAnchor` exposes `span`.
+
+### What is deliberately absent
+
+- **No Latin/CJK layout mode.** Both scripts share one baseline in horizontal
+  layout, so which script leads is a per-block choice of anchor.
+- **No cross-script size solver.** Prefer the CJK face's own Latin, which its
+  designer already balanced. If you deliberately pair a separate Latin face,
+  the compensation is one line from metrics this crate already exposes:
+  `latin_size = latin.font_size() * target_cap / latin.metrics().cap_height()?`.
+  Choose `target_cap` by measuring what the CJK face does with its own Latin
+  (PingFang 0.773 of its character face, Hiragino Sans GB 0.855) — there is no
+  universal constant.
+- **No CJK drop cap.** Drop caps are a Latin convention; CJK paragraphs open
+  with a first-line indent.
+- **Treat a CJK face's reported cap and x heights as unverified.** PingFang SC
+  publishes `sCapHeight` 0.860 em — a copy of its `sTypoAscender` — while its
+  Latin `H` really reaches 0.714 em, and `sxHeight` 0.600 against a real 0.517.
+  `cap_top` therefore returns a plausible, wrong value on CJK faces.
+- **Vertical layout, line-breaking, and punctuation compression** are out of
+  scope: they belong to shaping, not to grid geometry.
 
 ## Custom renderers (direct paint)
 

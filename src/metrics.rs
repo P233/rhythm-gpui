@@ -348,6 +348,10 @@ impl RhythmBlockMetrics {
     /// top and closes with the paired trimmed space, retaining the cap phase
     /// across fragments while the whole block still spans integer rows.
     ///
+    /// `cap_height` is generically the anchored ink's height above the
+    /// baseline: pass a Latin cap height, or a caller-supplied CJK ICF ascent
+    /// to anchor the ideographic character face instead.
+    ///
     /// # Panics
     ///
     /// Panics when `cap_height` is zero, negative, or non-finite.

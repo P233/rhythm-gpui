@@ -32,6 +32,58 @@ that guarded it — is gone from the new paths.
   the same chainable toggle. `rhythm_overlay(grid, color)` remains the
   explicit form.
 
+CJK ink anchors — horizontal CJK already shared Latin's baseline, so
+`baseline_top` and friends needed no change and none was made. One thing
+baseline anchoring cannot do is land ideographic _ink_ on a grid line, and
+that is the whole of this addition:
+
+- `RhythmFont::measure_icf(text_system, probes)` measures the character face
+  from the resolved face through `typographic_bounds` and returns a
+  `RhythmIcfAnchor` bound to that exact font, size, and grid. Its infallible
+  `span(top, bottom)` returns the paired opening that lands ideographic ink on
+  a grid line and still spans whole rhythm rows; `trim_top()` reports the
+  invisible band between the line box and that ink. `RhythmFont` itself remains
+  entirely determined by `RhythmFontSpec`, so ordinary resolved-font caches
+  carry no hidden measured/unmeasured state. The math layer needs nothing new
+  because `RhythmBlockMetrics::cap` already takes the anchored ink height as a
+  generic scalar — pass a character-face ascent instead of a cap height and it
+  yields the same opening and closing, plus row and fragment geometry.
+  Measuring beats reading the font's `BASE` table: SimSong ships none, and
+  Apple SD Gothic Neo's hangul overshoots its declared `icft` by 0.054 em,
+  while PingFang SC and Toppan Bunkyu Gothic agree within 0.003 em. Pass a
+  _set_ of full-frame glyphs — 国 alone stops 0.05 em short of 字 — and include
+  kana for Japanese, whose dakuten ride above the han envelope as Latin
+  ascenders ride above cap height. The measurement remains optional: gpui
+  0.2.2 exposes glyph ink bounds on CoreText and DirectWrite, while its Linux
+  backend does not yet implement them. Measurement preserves the public
+  distinction instead of discarding it: empty input returns `EmptyProbes`, all
+  failed bounds queries return `NoProbeBounds`, and returned-but-rejected bounds
+  return `NoUsableBounds` (the Linux path). DirectWrite can still substitute a
+  missing glyph with `.notdef`, so callers must choose probes covered by the
+  resolved face.
+- Cap-anchor docs now warn that a CJK face's reported cap and x heights may
+  describe no glyph at all: PingFang's `sCapHeight` 0.860 em is a copy of its
+  `sTypoAscender` while its `H` reaches 0.714 em. `RhythmBlockMetrics::cap`
+  documents its anchor scalar as generic ink height (a cap height or an ICF
+  ascent).
+- Deliberately absent, each for a reason now in the README: no Latin/CJK
+  layout mode (both scripts share one baseline; which leads is a per-block
+  anchor choice), no cross-script size solver (a CJK face's own Latin is
+  already balanced by its designer — PingFang draws `H` at 0.773 of its
+  character face — and a deliberate pairing is one line of arithmetic), and no
+  CJK drop cap (a Latin convention; CJK paragraphs open with a first-line
+  indent).
+- `recipes` example: twin ruled cards drawing the target so naive `.pt()`
+  visibly misses it while a heading anchored on its measured character face
+  lands on it, every edge a grid citizen so the overlay checks the claim. The
+  mixed-font row now closes each span with its own `baseline_bottom`, so it
+  spans whole rhythm rows.
+- `tests/shaping.rs` gains an ideographic-ink group pinning the measured
+  values against the font tables, the whole-row pairing, the anchor's resolved
+  font identity, the `EmptyProbes` / `UnresolvedFont` boundaries, and
+  CoreText's missing-glyph path to `NoProbeBounds`, plus the kana overshoot and
+  measurement for a face with no `BASE` table.
+
 Media support — content whose height follows its width (images, video,
 embeds) no longer knocks everything after it off the grid:
 

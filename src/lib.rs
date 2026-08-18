@@ -7,15 +7,16 @@
 //! This crate resolves real font metrics through gpui's text system, so
 //! baseline-anchored text lands on the rhythm grid without the manually measured
 //! `baseline-ratio` that the original Sass library required. Cap-anchored helpers
-//! instead align the capitals' ink while preserving whole-row block geometry.
+//! instead align the capitals' ink while preserving whole-row block geometry, and
+//! the ICF anchors do the same for the CJK ideographic character face.
 //!
 //! # Feature flags
 //!
 //! - **`gpui`** (default) — the gpui integration: `RhythmGrid`, `RhythmFont`
-//!   (with `RhythmFontSpec` cache keys), `RhythmDropCap`, the `RhythmStyled`
-//!   extension trait, the `rhythm_frame` media container (with the `RhythmFit`
-//!   pad/crop mode), and the configurable `rhythm_overlay` / `RhythmOverlay`
-//!   debug grid.
+//!   (with `RhythmFontSpec` cache keys), measured `RhythmIcfAnchor`s,
+//!   `RhythmDropCap`, the `RhythmStyled` extension trait, the `rhythm_frame`
+//!   media container (with the `RhythmFit` pad/crop mode), and the configurable
+//!   `rhythm_overlay` / `RhythmOverlay` debug grid.
 //! - Disable default features to build only the dependency-free rhythm math
 //!   ([`Rhythm`], [`FontRhythm`], [`RhythmLineMetrics`], [`RhythmBlockMetrics`],
 //!   [`DropCapRhythm`], [`snap`]), usable from any renderer that centers
@@ -68,8 +69,9 @@
 //!   values. Their pure geometry and spacing methods are O(1), allocation-free
 //!   (enforced by a counting-allocator test), and lock-free by construction,
 //!   with hot methods `#[inline]` across the crate boundary.
-//! - gpui `TextSystem` access is confined to font/spec/drop-cap resolution
-//!   factories; geometry and spacing on stored values never query it.
+//! - gpui `TextSystem` access is confined to font/spec/drop-cap resolution and
+//!   optional ICF measurement; geometry and spacing on stored values never
+//!   query it.
 //! - The shaped-line adapter reads a line's already-computed ascent/descent
 //!   and never walks glyphs.
 //! - `cargo bench --bench resolve` tracks warm font resolution (gpui's request
@@ -106,6 +108,6 @@ pub use frame::{rhythm_frame, RhythmFit, RhythmFrame};
 #[cfg(feature = "gpui")]
 #[cfg_attr(docsrs, doc(cfg(feature = "gpui")))]
 pub use integration::{
-    rhythm_overlay, RhythmDropCap, RhythmFont, RhythmFontSpec, RhythmGrid, RhythmOverlay,
-    RhythmStyled,
+    rhythm_overlay, IcfMeasurementError, RhythmDropCap, RhythmFont, RhythmFontSpec, RhythmGrid,
+    RhythmIcfAnchor, RhythmOverlay, RhythmStyled,
 };

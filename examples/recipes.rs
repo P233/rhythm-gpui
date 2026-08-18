@@ -5,10 +5,13 @@
 //! still lands on the grid, with no per-font `baseline-ratio` lookup. Includes
 //! a three-line drop cap, a mixed-font row of four runs (two serif sizes, mono,
 //! CJK) sharing one alphabetic baseline, a fluid-width image in a
-//! `rhythm_frame` with a pad/crop toggle, and a toolbar toggle switching the
+//! `rhythm_frame` with a pad/crop toggle, a toolbar toggle switching the
 //! page opening between a baseline-anchored and a cap-anchored (optical)
-//! heading. Fonts are fetched as TTF via the css2 API (non-browser user agents
-//! are served `truetype` sources) on the background executor.
+//! heading, and a CJK section: a heading anchored on its measured character
+//! face, plus twin ruled cards showing what naive padding does to ideographic
+//! ink and what `RhythmIcfAnchor::span` does instead. Fonts are fetched as TTF
+//! via the css2 API (non-browser user agents are served `truetype` sources) on
+//! the background executor.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -17,11 +20,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui::{
-    div, font, img, prelude::*, px, rgb, size, App, Application, Bounds, ClickEvent, Context,
+    div, font, img, prelude::*, px, rgb, rgba, size, App, Application, Bounds, ClickEvent, Context,
     FocusHandle, FontStyle, FontWeight, KeyBinding, ObjectFit, Pixels, TextRun, TextSystem, Window,
     WindowBounds, WindowOptions,
 };
-use rhythm_gpui::{rhythm_frame, RhythmDropCap, RhythmFit, RhythmFont, RhythmGrid, RhythmStyled};
+use rhythm_gpui::{
+    rhythm_frame, IcfMeasurementError, RhythmDropCap, RhythmFit, RhythmFont, RhythmGrid,
+    RhythmIcfAnchor, RhythmStyled,
+};
 
 gpui::actions!(rhythm_recipes, [FocusNext, FocusPrevious]);
 
@@ -87,6 +93,18 @@ separate elements, yet align on one alphabetic baseline computed from their resp
 CJK fonts publish the same metrics, but ideographs are drawn on the em square rather than seated \
 on the line, so their ink dips slightly below it — the standard behavior for mixed scripts:";
 
+/// Full-frame han glyphs whose ink defines the character face this demo
+/// anchors on. `measure_icf` takes the tallest, so a set beats a
+/// single probe: 国 alone stops 0.05 em short of what 字 reaches. Setting
+/// Japanese would add kana (ぱポ) whose dakuten ride above the han envelope.
+const ICF_PROBES: &str = "字永語国";
+
+/// Rhythm units from a demo card's top edge down to where the heading's ink
+/// is supposed to start.
+const CARD_INK_ROWS: i32 = 2;
+
+const CJK_HEADING: &str = "字面框锚点";
+
 /// The text styles of the reading layout, resolved for one family.
 struct FontSet {
     heading: RhythmFont,
@@ -127,7 +145,10 @@ struct Demo {
     selected: usize,
     set: FontSet,
     mono: RhythmFont,
+    caption: RhythmFont,
     cjk: RhythmFont,
+    cjk_heading: RhythmFont,
+    cjk_heading_anchor: Result<RhythmIcfAnchor, IcfMeasurementError>,
     loaded: HashSet<&'static str>,
     loading: Option<&'static str>,
     error: Option<String>,
@@ -469,6 +490,10 @@ impl Demo {
     /// rather than seated on the baseline (PingFang SC ink reaches ~0.1 em
     /// below it), so their ink dips under the shared line while the metric
     /// alignment stays exact — the same convention CSS inline layout uses.
+    ///
+    /// Each span also closes with its own `baseline_bottom`, which makes
+    /// every span — and therefore the row — `max_above + 1` rhythm units
+    /// tall, so the CJK section below starts on a grid line.
     fn mixed_font_row(&self) -> impl IntoElement {
         let grid = self.grid;
         let spans: [(&RhythmFont, &'static str, u32); 4] = [
@@ -482,7 +507,9 @@ impl Demo {
             .map(|(f, ..)| f32::from(f.baseline_above()))
             .fold(0., f32::max);
         // The media frame above closes on a grid line, so the row opens with
-        // a plain rhythm height down to the shared baseline.
+        // a plain rhythm height down to the shared baseline. `max_above` is
+        // not a whole-unit length, so the opening absorbs it and each span's
+        // bottom close returns the row to whole rows.
         div()
             .flex()
             .items_start()
@@ -492,10 +519,135 @@ impl Demo {
                 div()
                     .rhythm_font(span_font)
                     .pt(px(max_above - f32::from(span_font.baseline_above())))
+                    .pb(span_font.baseline_bottom(1))
                     .text_color(rgb(color))
                     .whitespace_nowrap()
                     .child(text)
             }))
+    }
+
+    /// The one visual: two identical cards asking for the same thing —
+    /// heading ink `CARD_INK_ROWS` rhythm units below the card's top edge —
+    /// with a rule drawn at exactly that target. The left card pays the naive
+    /// `.pt(grid.height(2))`, which measures to the *line box* and so lands
+    /// the ink a whole anchor `trim_top` lower; the right card uses the
+    /// measured anchor's `span`, which subtracts that invisible band and lands
+    /// on the rule.
+    ///
+    /// Every edge here is a grid citizen, which is what makes the claim
+    /// checkable rather than asserted: the block opens on a grid line, the
+    /// intro and both captions are whole-row rhythm blocks, and each card is
+    /// nine whole rows tall. So the card's top edge *is* a grid line and the
+    /// target sits two rows below it — turn the overlay on and the right
+    /// card's ink lands on a real stripe boundary, while the left card's
+    /// floats between them.
+    fn cjk_edge_comparison(&self) -> impl IntoElement {
+        let grid = self.grid;
+        let target = grid.height(CARD_INK_ROWS);
+
+        let note = |tint: u32, text: String| {
+            div()
+                .rhythm_block(&self.caption, 2, 1)
+                .text_color(rgb(tint))
+                .child(text)
+        };
+        let anchor = match &self.cjk_heading_anchor {
+            Ok(anchor) => anchor,
+            Err(error) => {
+                return div()
+                    .mt(grid.height(2))
+                    .child(
+                        div()
+                            .rhythm_block(&self.cjk_heading, CARD_INK_ROWS, 1)
+                            .child(CJK_HEADING),
+                    )
+                    .child(note(
+                        0x9a6700,
+                        format!(
+                            "ICF comparison unavailable: {error}. The heading above uses the \
+                             baseline-aligned fallback."
+                        ),
+                    ));
+            }
+        };
+        let heading = anchor.font();
+        let trim = anchor.trim_top();
+        let (anchored_pt, _) = anchor.span(CARD_INK_ROWS, 0);
+        let rule = |y: Pixels, color: u32| {
+            div()
+                .absolute()
+                .top(y)
+                .left_0()
+                .right_0()
+                .h(px(1.))
+                .bg(rgba(color))
+        };
+
+        let card = |padding_top: Pixels, ink_y: Pixels, tint: u32, text: String| {
+            div()
+                .flex_1()
+                .child(
+                    div()
+                        .relative()
+                        .h(grid.height(9))
+                        .rounded_md()
+                        .overflow_hidden()
+                        .bg(rgb(0xf6f8fa))
+                        .child(
+                            div()
+                                .pt(padding_top)
+                                .px(grid.spacing(2))
+                                .rhythm_font(heading)
+                                .child(CJK_HEADING),
+                        )
+                        // Painted over the text, so a miss reads as a gap
+                        // rather than as two unrelated things.
+                        .child(rule(target, 0x0969daff))
+                        .child(rule(ink_y, (tint << 8) | 0xcc)),
+                )
+                .child(note(tint, text))
+        };
+
+        div()
+            .mt(grid.height(2))
+            .child(note(
+                0x57606a,
+                format!(
+                    "Blue rule = the target, {}px (2 rhythm rows) below each card's \
+                     top edge — the cards start on a grid line, so the target is one \
+                     too. {:.2}px of the line box above the character face is invisible.",
+                    f32::from(target),
+                    f32::from(trim),
+                ),
+            ))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(grid.spacing(3))
+                    .child(card(
+                        target,
+                        target + trim,
+                        0xcf222e,
+                        format!(
+                            ".pt(px({:.0}.)) — ink lands at {:.2}px, {:.2}px low",
+                            f32::from(target),
+                            f32::from(target + trim),
+                            f32::from(trim),
+                        ),
+                    ))
+                    .child(card(
+                        anchored_pt,
+                        target,
+                        0x1a7f37,
+                        format!(
+                            ".pt(anchor.span({}, 0).0) = {:.2}px — ink lands at exactly {:.0}px",
+                            CARD_INK_ROWS,
+                            f32::from(anchored_pt),
+                            f32::from(target),
+                        ),
+                    )),
+            )
     }
 }
 
@@ -581,7 +733,8 @@ impl Render for Demo {
                                         .child(PARA_3),
                                 )
                                 .child(self.media_figure())
-                                .child(self.mixed_font_row()),
+                                .child(self.mixed_font_row())
+                                .child(self.cjk_edge_comparison()),
                         )
                         .rhythm_debug_overlay(grid, self.show_grid),
                 ),
@@ -665,9 +818,18 @@ fn main() {
 
         let grid = RhythmGrid::new(px(8.));
         let text_system = cx.text_system();
-        let set = FontSet::resolve(text_system, CHOICES[0].family, grid);
         let mono = grid.font(text_system, font("Menlo"), px(13.), 3);
+        let caption = grid.font(text_system, font("Menlo"), px(11.), 2);
         let cjk = grid.font(text_system, font("PingFang SC"), px(16.), 3);
+        // The heading's character face is measured from the resolved face, so
+        // no per-font constant is hand-copied and faces without a BASE table
+        // work the same way. The comparison falls back to a baseline-aligned
+        // heading when the active text backend cannot provide glyph ink bounds.
+        let mut cjk_heading_font = font("PingFang SC");
+        cjk_heading_font.weight = FontWeight::BOLD;
+        let cjk_heading = grid.font(text_system, cjk_heading_font, px(24.), 5);
+        let cjk_heading_anchor = cjk_heading.measure_icf(text_system, ICF_PROBES);
+        let set = FontSet::resolve(text_system, CHOICES[0].family, grid);
 
         let bounds = Bounds::centered(None, size(px(840.), px(720.)), cx);
         cx.open_window(
@@ -685,7 +847,10 @@ fn main() {
                         selected: 0,
                         set,
                         mono,
+                        caption,
                         cjk,
+                        cjk_heading,
+                        cjk_heading_anchor,
                         loaded: HashSet::new(),
                         loading: None,
                         error: None,
@@ -706,6 +871,28 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
+
+    /// A Rust `\`-continuation inside a string literal strips the newline
+    /// *and* the following indentation. Tooling that collapses the
+    /// continuation itself leaves that indentation behind as literal spaces
+    /// mid-sentence, which renders as visibly broken copy rather than as a
+    /// compile error — so guard the source instead of the output.
+    #[test]
+    fn prose_has_no_collapsed_line_continuations() {
+        // Built rather than written, so this check does not flag itself.
+        let run = " ".repeat(6);
+        for (n, line) in include_str!("recipes.rs").lines().enumerate() {
+            let gap = line
+                .trim_end()
+                .split_once(|c: char| !c.is_whitespace())
+                .is_some_and(|(_, rest)| rest.contains(&run));
+            assert!(
+                !gap,
+                "line {} has a run of spaces mid-text: {line:?}",
+                n + 1
+            );
+        }
+    }
 
     #[test]
     fn css_parser_keeps_unique_ttf_urls_only() {
