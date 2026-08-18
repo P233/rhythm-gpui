@@ -237,8 +237,10 @@ impl RhythmLineMetrics {
     }
 
     /// The smallest `line_rhythms` whose line box contains the shaped ink, at
-    /// least 1. Shares [`Rhythm::snap_up`]'s float tolerance, so ink within a
-    /// few rounding steps of a whole-row height does not claim an extra row.
+    /// least 1. Applies the same snapping rule as [`Rhythm::snap_up`] — at
+    /// `f64` precision, since shaped metrics are summed rather than measured —
+    /// so ink within a few rounding steps of a whole-row height does not claim
+    /// an extra row.
     ///
     /// Advisory: the renderer decides whether to grow the line or keep its
     /// chosen height and accept the overflow.
@@ -264,6 +266,10 @@ impl RhythmLineMetrics {
         self.minimum_line_rows() > f64::from(self.line_rhythms)
     }
 
+    // The same snapping rule as `Rhythm::snap_rows`, computed in `f64`: the
+    // inputs are exact `f32` promotions, so here the division noise sits far
+    // below the tolerance instead of being what it absorbs. The duplication
+    // is deliberate — see the note there before merging them.
     #[inline]
     fn minimum_line_rows(&self) -> f64 {
         let ink = f64::from(self.ascent) + f64::from(self.descent);
@@ -364,15 +370,18 @@ impl RhythmBlockMetrics {
         self.line
     }
 
-    /// Opening rhythm units above the anchor (baseline or cap ink).
+    /// Opening rhythm units above the anchor (baseline or cap ink). A row
+    /// count, not a length — [`opening`](Self::opening) is the pixel spacing
+    /// it produces.
     #[inline]
-    pub const fn top(&self) -> i32 {
+    pub const fn top_rhythms(&self) -> i32 {
         self.top
     }
 
     /// Closing rhythm units below the last baseline, or the paired cap close.
+    /// A row count, not a length; see [`closing`](Self::closing).
     #[inline]
-    pub const fn bottom(&self) -> i32 {
+    pub const fn bottom_rhythms(&self) -> i32 {
         self.bottom
     }
 
@@ -769,7 +778,7 @@ mod tests {
                 block.rows(9)
             );
             assert_eq!(block.first_rows(1) + block.last_rows(1), block.rows(2));
-            assert_eq!(block.first_rows(5), block.top() + 5 * line_rhythms);
+            assert_eq!(block.first_rows(5), block.top_rhythms() + 5 * line_rhythms);
             assert_eq!(block.middle_rows(4), 4 * line_rhythms);
             let trailing = if block.is_cap_anchored() {
                 0
@@ -778,7 +787,7 @@ mod tests {
             };
             assert_eq!(
                 block.last_rows(3),
-                3 * line_rhythms + block.bottom() - trailing
+                3 * line_rhythms + block.bottom_rhythms() - trailing
             );
         }
     }
@@ -848,7 +857,7 @@ mod tests {
             .checked_sub(2)
             .expect("test viewport origin overflowed");
         let first_row = visible_top
-            .checked_add(i64::from(visible.top()))
+            .checked_add(i64::from(visible.top_rhythms()))
             .and_then(|row| row.checked_sub(viewport_origin))
             .expect("test first baseline cursor overflowed");
         let continuation_row = visible_top

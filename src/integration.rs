@@ -47,7 +47,11 @@ impl RhythmGrid {
         px(self.core.size())
     }
 
-    fn core(&self) -> Rhythm {
+    /// This grid as the dependency-free [`Rhythm`] — the entry to the math
+    /// layer, mirroring [`RhythmFont::metrics`] for fonts. Use it to reach
+    /// [`Rhythm`] methods with values already held as [`FontRhythm`].
+    #[inline]
+    pub const fn rhythm(&self) -> Rhythm {
         self.core
     }
 
@@ -63,10 +67,11 @@ impl RhythmGrid {
     /// rhythm.
     #[inline]
     pub fn spacing(&self, n: i32) -> Pixels {
-        px(self.core().spacing(n))
+        px(self.rhythm().spacing(n))
     }
 
-    /// Total height of `n` rhythm units (rhythm-sass `rhythm($n)`).
+    /// Total height of `n` rhythm units (rhythm-sass `rhythm($n)`). An exact
+    /// alias for [`spacing`](Self::spacing), kept as the vertical name.
     #[inline]
     pub fn height(&self, n: i32) -> Pixels {
         self.spacing(n)
@@ -83,7 +88,7 @@ impl RhythmGrid {
     /// Panics when `height` is negative or non-finite.
     #[inline]
     pub fn snap_up(&self, height: Pixels) -> Pixels {
-        px(self.core().snap_up(height.into()))
+        px(self.rhythm().snap_up(height.into()))
     }
 
     /// Round `height` down to whole rhythm rows — the crop strategy; see
@@ -94,7 +99,7 @@ impl RhythmGrid {
     /// Panics when `height` is negative or non-finite.
     #[inline]
     pub fn snap_down(&self, height: Pixels) -> Pixels {
-        px(self.core().snap_down(height.into()))
+        px(self.rhythm().snap_down(height.into()))
     }
 
     /// Metrics for one shaped line on this grid — the `Pixels`-typed entry to
@@ -108,7 +113,7 @@ impl RhythmGrid {
         descent: Pixels,
         line_rhythms: u32,
     ) -> RhythmLineMetrics {
-        RhythmLineMetrics::new(ascent.into(), descent.into(), line_rhythms, self.core())
+        RhythmLineMetrics::new(ascent.into(), descent.into(), line_rhythms, self.rhythm())
     }
 
     /// [`line_metrics`](Self::line_metrics) with `line_rhythms` as a floor:
@@ -119,7 +124,7 @@ impl RhythmGrid {
         descent: Pixels,
         line_rhythms: u32,
     ) -> RhythmLineMetrics {
-        RhythmLineMetrics::at_least(ascent.into(), descent.into(), line_rhythms, self.core())
+        RhythmLineMetrics::at_least(ascent.into(), descent.into(), line_rhythms, self.rhythm())
     }
 
     /// The smallest line box on this grid containing every line in `metrics`.
@@ -128,7 +133,7 @@ impl RhythmGrid {
     ///
     /// Panics when `metrics` is empty or an entry was built on another grid.
     pub fn line_metrics_covering(&self, metrics: &[RhythmLineMetrics]) -> RhythmLineMetrics {
-        RhythmLineMetrics::covering(metrics, self.core())
+        RhythmLineMetrics::covering(metrics, self.rhythm())
     }
 
     /// Resolve a font bound to this grid — [`RhythmFont::resolve`] with the
@@ -206,9 +211,9 @@ impl RhythmGrid {
     /// Panics when `font` was resolved against a different grid size.
     #[deprecated(since = "0.2.0", note = "use `RhythmFont::cap_bottom`")]
     #[inline]
-    pub fn cap_bottom(&self, font: &RhythmFont, m: i32) -> Option<Pixels> {
+    pub fn cap_bottom(&self, font: &RhythmFont, n: i32) -> Option<Pixels> {
         self.assert_font(font);
-        font.cap_bottom(m)
+        font.cap_bottom(n)
     }
 }
 
@@ -484,7 +489,7 @@ impl RhythmFont {
     /// single-style text, empty lines, and mixed-run shaped lines through
     /// one code path.
     pub fn line_metrics(&self) -> RhythmLineMetrics {
-        self.metrics.line_metrics(self.grid.core())
+        self.metrics.line_metrics(self.grid.rhythm())
     }
 
     /// The grid this font was resolved against.
@@ -501,7 +506,7 @@ impl RhythmFont {
     /// as a padding.
     #[inline]
     pub fn baseline_top(&self, n: i32) -> Pixels {
-        px(self.grid.core().baseline_top(&self.metrics, n))
+        px(self.grid.rhythm().baseline_top(&self.metrics, n))
     }
 
     /// Bottom spacing that puts the nth grid line below the last baseline at
@@ -512,7 +517,7 @@ impl RhythmFont {
     /// distance — meaningful as a margin, not as a padding.
     #[inline]
     pub fn baseline_bottom(&self, n: i32) -> Pixels {
-        px(self.grid.core().baseline_bottom(&self.metrics, n))
+        px(self.grid.rhythm().baseline_bottom(&self.metrics, n))
     }
 
     /// Spacing from a block set in this font down to a following block set in
@@ -535,7 +540,7 @@ impl RhythmFont {
         );
         px(self
             .grid
-            .core()
+            .rhythm()
             .baseline_between(&self.metrics, &below.metrics, n))
     }
 
@@ -546,15 +551,15 @@ impl RhythmFont {
     /// the pair in one call. `None` when the font has no usable cap height.
     #[inline]
     pub fn cap_top(&self, n: i32) -> Option<Pixels> {
-        self.grid.core().cap_top(&self.metrics, n).map(px)
+        self.grid.rhythm().cap_top(&self.metrics, n).map(px)
     }
 
     /// Bottom spacing pairing [`Self::cap_top`], returning the trimmed space
     /// so the block closes on whole rhythm rows; see [`Rhythm::cap_bottom`].
     /// `None` when the font has no usable cap height.
     #[inline]
-    pub fn cap_bottom(&self, m: i32) -> Option<Pixels> {
-        self.grid.core().cap_bottom(&self.metrics, m).map(px)
+    pub fn cap_bottom(&self, n: i32) -> Option<Pixels> {
+        self.grid.rhythm().cap_bottom(&self.metrics, n).map(px)
     }
 
     /// The cap-anchored opening as one paired value:
@@ -610,14 +615,21 @@ impl RhythmFont {
     /// The rhythm line height: `line_rhythms × grid size`.
     #[inline]
     pub fn line_height(&self) -> Pixels {
-        px(self.metrics.line_height(self.grid.core()))
+        px(self.metrics.line_height(self.grid.rhythm()))
     }
 
     /// Distance from the top of the line box down to the baseline, as gpui will
     /// paint it. Useful for custom elements and debug overlays.
     #[inline]
     pub fn baseline_above(&self) -> Pixels {
-        px(self.metrics.baseline_above(self.grid.core()))
+        px(self.metrics.baseline_above(self.grid.rhythm()))
+    }
+
+    /// Distance from the baseline down to the bottom of the line box, as gpui
+    /// will paint it — the counterpart of [`Self::baseline_above`].
+    #[inline]
+    pub fn baseline_below(&self) -> Pixels {
+        px(self.metrics.baseline_below(self.grid.rhythm()))
     }
 
     /// Invisible space above the cap height; subtract from a top spacing (or apply
@@ -626,14 +638,14 @@ impl RhythmFont {
     /// created with [`Self::from_baseline_ratio`].
     #[inline]
     pub fn cap_trim_top(&self) -> Option<Pixels> {
-        self.metrics.cap_trim_top(self.grid.core()).map(px)
+        self.metrics.cap_trim_top(self.grid.rhythm()).map(px)
     }
 
     /// Like [`Self::cap_trim_top`] but trimming to the x-height. `None` when the
     /// metrics source has no usable x-height.
     #[inline]
     pub fn x_trim_top(&self) -> Option<Pixels> {
-        self.metrics.x_trim_top(self.grid.core()).map(px)
+        self.metrics.x_trim_top(self.grid.rhythm()).map(px)
     }
 }
 
@@ -795,7 +807,8 @@ impl RhythmFontSpec {
                 .iter()
                 .map(|spec| spec.resolve(text_system).line_metrics()),
         );
-        let line_rhythms = RhythmLineMetrics::covering(&covered, self.grid().core()).line_rhythms();
+        let line_rhythms =
+            RhythmLineMetrics::covering(&covered, self.grid().rhythm()).line_rhythms();
 
         if line_rhythms == self.line_rhythms {
             return primary;
@@ -857,7 +870,7 @@ impl RhythmDropCap {
         let probe = RhythmFont::resolve(text_system, font.clone(), body.font_size(), 1, body.grid);
         let solved = body
             .metrics()
-            .drop_cap(probe.metrics(), lines, body.grid.core());
+            .drop_cap(probe.metrics(), lines, body.grid.rhythm());
         Self {
             font: RhythmFont {
                 font,
@@ -1023,6 +1036,7 @@ impl RhythmOverlay {
     /// # Panics
     ///
     /// Panics when `offset` is not finite.
+    #[must_use]
     pub fn phase(mut self, offset: Pixels) -> Self {
         assert!(
             f32::from(offset).is_finite(),
@@ -1136,6 +1150,7 @@ mod tests {
     #[test]
     fn pixels_mirrors_agree_with_the_math_layer() {
         let grid = RhythmGrid::new(px(8.0));
+        assert_eq!(grid.rhythm(), Rhythm::new(8.0));
         assert_eq!(grid.spacing(5), px(40.0));
         assert_eq!(grid.height(5), grid.spacing(5));
         let line = grid.line_metrics(px(14.67), px(3.51), 3);
@@ -1597,6 +1612,7 @@ mod tests {
             grid.line_metrics(px(body.metrics().ascent()), px(body.metrics().descent()), 3);
         assert_eq!(from_font, from_grid);
         assert_eq!(f32::from(body.baseline_above()), from_font.baseline_above());
+        assert_eq!(f32::from(body.baseline_below()), from_font.baseline_below());
         assert_eq!(f32::from(body.line_height()), from_font.line_height());
     }
 }

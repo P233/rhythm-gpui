@@ -31,7 +31,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = ["gpui"]
 # The gpui integration (RhythmGrid, RhythmFont, RhythmDropCap, RhythmStyled,
-# rhythm_frame, rhythm_overlay).
+# rhythm_frame/RhythmFit, rhythm_overlay).
 # Without it only the dependency-free rhythm math is built.
 gpui = ["dep:gpui"]
 # Enables gpui's headless layout harness for this crate's geometry tests.

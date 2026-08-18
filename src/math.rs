@@ -133,17 +133,17 @@ impl Rhythm {
         Some(self.height(n) - font.cap_trim_top(*self)?)
     }
 
-    /// Bottom spacing pairing [`Self::cap_top`]: `m × size + cap_trim_top`,
+    /// Bottom spacing pairing [`Self::cap_top`]: `n × size + cap_trim_top`,
     /// returning at the bottom exactly what `cap_top` trimmed at the top so
     /// the block occupies a whole number of rhythm rows — for any number of
     /// wrapped lines, since lines advance by whole rows. Equivalently, the
-    /// bottom edge lands `m + line_rhythms` units below the last line's cap
+    /// bottom edge lands `n + line_rhythms` units below the last line's cap
     /// top.
     ///
     /// `None` when `font` has no usable cap height.
     #[inline]
-    pub fn cap_bottom(&self, font: &FontRhythm, m: i32) -> Option<f32> {
-        Some(self.height(m) + font.cap_trim_top(*self)?)
+    pub fn cap_bottom(&self, font: &FontRhythm, n: i32) -> Option<f32> {
+        Some(self.height(n) + font.cap_trim_top(*self)?)
     }
 
     /// The smallest whole number of rhythm rows covering `height` — the pad
@@ -178,7 +178,15 @@ impl Rhythm {
         self.size * self.snap_rows(height, f32::floor)
     }
 
-    fn snap_rows(&self, height: f32, round_out: fn(f32) -> f32) -> f32 {
+    // Deliberately kept separate from `RhythmLineMetrics::minimum_line_rows`,
+    // which applies the same rule in `f64`. The two are calibrated to their
+    // inputs' precision, not merely duplicated: this path divides an `f32`
+    // height, whose own rounding error the tolerance absorbs, so widening it
+    // to `f64` changes results once the tolerance approaches half a unit
+    // (`snap_up_keeps_a_real_remainder_at_large_heights` pins one such case),
+    // and bounding the tolerance instead stops it absorbing the `f32` noise
+    // it exists for. Change one only with a differential sweep over both.
+    fn snap_rows(&self, height: f32, round_away: fn(f32) -> f32) -> f32 {
         assert!(
             height.is_finite() && height >= 0.0,
             "height must be finite and non-negative"
@@ -193,7 +201,7 @@ impl Rhythm {
         if (height - nearest_height).abs() <= tolerance {
             nearest
         } else {
-            round_out(rows)
+            round_away(rows)
         }
     }
 }
@@ -332,6 +340,7 @@ impl FontRhythm {
 
     /// Set the capital height above the baseline, enabling [`Self::cap_trim_top`].
     /// Non-finite or non-positive values are treated as unavailable.
+    #[must_use]
     pub fn with_cap_height(mut self, cap_height: f32) -> Self {
         self.cap_height = usable_metric(cap_height);
         self
@@ -339,6 +348,7 @@ impl FontRhythm {
 
     /// Set the x-height above the baseline, enabling [`Self::x_trim_top`].
     /// Non-finite or non-positive values are treated as unavailable.
+    #[must_use]
     pub fn with_x_height(mut self, x_height: f32) -> Self {
         self.x_height = usable_metric(x_height);
         self
@@ -658,6 +668,18 @@ mod tests {
     fn snap_heights_absorb_float_error_near_whole_rows() {
         assert_eq!(GRID.snap_up(448.0002), 448.0);
         assert_eq!(GRID.snap_down(447.9998), 448.0);
+    }
+
+    #[test]
+    fn snap_up_keeps_a_real_remainder_at_large_heights() {
+        // Guards the `f32` calibration of `snap_rows`: at this magnitude the
+        // proportional tolerance (~4.25) approaches half the 8.5 unit, and
+        // computing the same rule in `f64` instead swallows the genuine 4px
+        // remainder and returns the row below. 4460404.5 / 8.5 is
+        // 524753.47..., so snapping up must reach row 524754.
+        let grid = Rhythm::new(8.5);
+        assert_eq!(grid.snap_up(4_460_404.5), 8.5 * 524_754.0);
+        assert_eq!(grid.snap_down(4_460_404.5), 8.5 * 524_753.0);
     }
 
     #[test]

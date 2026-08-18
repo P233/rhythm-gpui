@@ -19,7 +19,9 @@ that guarded it — is gone from the new paths.
   accidentally closed with a baseline `bottom` less likely.
 - `RhythmStyled::rhythm_block(&font, top, bottom)`: the whole-rows text-block
   recipe (font plus baseline-paired paddings) in one call.
-- `RhythmFont::grid()` accessor.
+- `RhythmFont::grid()`, `RhythmFont::baseline_below()` (the counterpart of the
+  existing `baseline_above()`), and `RhythmGrid::rhythm()` — the entry to the
+  dependency-free `Rhythm`, mirroring `RhythmFont::metrics()` for fonts.
 - `Rhythm::spacing(n)` / `RhythmGrid::spacing(n)`: an axis-neutral rhythm-unit
   length for horizontal padding, gaps, and indents; `height(n)` remains the
   vertical name for the same calculation.
@@ -37,9 +39,12 @@ embeds) no longer knocks everything after it off the grid:
   wrappers): round a free height outward to whole rhythm rows, with a small
   `f32`-precision tolerance absorbing float error from measured sizes.
 - `rhythm_frame(grid, ratio)`: a fluid-width container that re-snaps its
-  height in the layout pass at every width. Default pads the sub-unit
-  remainder below the content; `.crop()` rounds down and clips natural-height
-  content evenly between its top and bottom edges. The content overlays a
+  height in the layout pass at every width. `.fit(RhythmFit::Pad | Crop)`
+  chooses the mode as a value, so a runtime choice stays one call; the default
+  pads the sub-unit remainder below the content, and `RhythmFit::Crop` (or the
+  `.crop()` shorthand) rounds down and clips natural-height content evenly
+  between its top and bottom edges. The frame requires a parent offering a
+  definite width. The content overlays a
   measured sizer leaf, so the box reserves its height before an image loads —
   no layout shift.
 - `recipes` example (renamed from `demo` to say what it collects): a
@@ -64,9 +69,11 @@ advice:
   `RhythmFont::line_metrics()`, `FontRhythm::line_metrics(grid)`.
 - `RhythmBlockMetrics`: whole-row block geometry over one line's metrics —
   baseline anchors (`new`) or cap-ink anchors (`cap`), opening/closing and
-  first/middle/last fragment heights, `first_baseline`, and exact integer
-  `rows`, so callers can use concrete geometry without accumulated `f32`
-  drift or keep a row cursor for virtualization.
+  first/middle/last fragment heights, `first_baseline`, the
+  unit-explicit `top_rhythms`/`bottom_rhythms` anchor counts (matching
+  `line_rhythms`, since the neighboring accessors return lengths), and exact
+  integer `rows`, so callers can use concrete geometry without accumulated
+  `f32` drift or keep a row cursor for virtualization.
 - `RhythmBlockMetrics::first_rows` / `middle_rows` / `last_rows`: ordered
   integer cursor transitions that partition `rows` precisely across split
   blocks. Accumulate them in an `i64`; `baseline_at_row` restores a rebased

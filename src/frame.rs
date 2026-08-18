@@ -24,10 +24,17 @@ use crate::RhythmGrid;
 /// before an image loads — no layout shift.
 ///
 /// By default the height rounds **up** and the leftover space — always under
-/// one rhythm unit — is left below the content (pad). Call
-/// [`RhythmFrame::crop`] to round **down** instead and clip the overfill.
+/// one rhythm unit — is left below the content (pad). Choose the mode with
+/// [`RhythmFrame::fit`], or [`RhythmFrame::crop`] for the shorthand.
 /// With a known width the frame is unnecessary — size the block directly
 /// with [`RhythmGrid::snap_up`].
+///
+/// The frame needs a parent that offers a **definite width**: a height that
+/// follows the width is unknowable under an intrinsic (min-/max-content)
+/// measurement, so the frame reports no size in that pass and contributes
+/// nothing to a shrink-to-fit parent. Give the frame's container a resolved
+/// width — a full-width column or a sized panel — rather than asking a
+/// shrink-to-fit wrapper to derive its width from the frame.
 ///
 /// # Examples
 ///
@@ -35,27 +42,43 @@ use crate::RhythmGrid;
 /// use std::path::PathBuf;
 ///
 /// use gpui::{img, prelude::*, px, ObjectFit};
-/// use rhythm_gpui::{rhythm_frame, RhythmGrid};
+/// use rhythm_gpui::{rhythm_frame, RhythmFit, RhythmGrid};
 ///
 /// fn figure(grid: RhythmGrid, crop: bool) -> impl IntoElement {
 ///     // Pad (default) keeps the whole image and leaves the sub-unit
-///     // remainder below it; `.crop()` splits the clipped remainder between
-///     // the top and bottom edges.
-///     let frame = rhythm_frame(grid, 16. / 9.);
-///     let frame = if crop { frame.crop() } else { frame };
-///     frame.child(
-///         img(PathBuf::from("photo.jpg"))
-///             .size_full()
-///             .object_fit(ObjectFit::Cover),
-///     )
+///     // remainder below it; crop splits the clipped remainder between the
+///     // top and bottom edges.
+///     rhythm_frame(grid, 16. / 9.)
+///         .fit(if crop { RhythmFit::Crop } else { RhythmFit::Pad })
+///         .child(
+///             img(PathBuf::from("photo.jpg"))
+///                 .size_full()
+///                 .object_fit(ObjectFit::Cover),
+///         )
 /// }
 /// ```
 #[derive(IntoElement)]
 pub struct RhythmFrame {
     grid: RhythmGrid,
     ratio: f32,
-    crop: bool,
+    fit: RhythmFit,
     children: Vec<AnyElement>,
+}
+
+/// How a [`RhythmFrame`] reconciles its content's natural height with whole
+/// rhythm rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RhythmFit {
+    /// Round **up** and leave the remainder — always under one rhythm unit —
+    /// as space below the content. Keeps the whole image, which suits
+    /// diagrams and screenshots.
+    #[default]
+    Pad,
+    /// Round **down** and clip the natural-height content evenly between the
+    /// top and bottom edges, never scaling it to the snapped height. Suits
+    /// full-bleed photography; frames narrower than one row's worth of
+    /// content floor to zero height.
+    Crop,
 }
 
 /// Create a [`RhythmFrame`] for content with a `width / height` ratio of
@@ -72,22 +95,28 @@ pub fn rhythm_frame(grid: RhythmGrid, ratio: f32) -> RhythmFrame {
     RhythmFrame {
         grid,
         ratio,
-        crop: false,
+        fit: RhythmFit::Pad,
         children: Vec::new(),
     }
 }
 
 impl RhythmFrame {
-    /// Round the height down instead of up: the natural-height content
-    /// overfills the frame by less than one rhythm unit, is centered, and is
-    /// clipped evenly between the top and bottom edges instead of padded.
-    /// Rounding down never scales the content to the snapped height. Suits
-    /// full-bleed photography; keep the default pad for diagrams and
-    /// screenshots, and note that frames narrower than one row's worth of
-    /// content floor to zero height.
-    pub fn crop(mut self) -> Self {
-        self.crop = true;
+    /// Choose how the height snaps to whole rhythm rows. Takes the mode as a
+    /// value, so a runtime choice needs no rebinding:
+    /// `.fit(if crop { RhythmFit::Crop } else { RhythmFit::Pad })`.
+    #[must_use]
+    pub fn fit(mut self, fit: RhythmFit) -> Self {
+        self.fit = fit;
         self
+    }
+
+    /// Shorthand for [`fit(RhythmFit::Crop)`](Self::fit): round the height
+    /// down instead of up, so the natural-height content overfills the frame
+    /// by less than one rhythm unit and is clipped evenly between the top and
+    /// bottom edges instead of padded.
+    #[must_use]
+    pub fn crop(self) -> Self {
+        self.fit(RhythmFit::Crop)
     }
 }
 
@@ -110,7 +139,7 @@ impl RenderOnce for RhythmFrame {
         let natural = natural.children(self.children);
 
         let mut mask = div().absolute().inset_0().overflow_hidden();
-        if self.crop {
+        if self.fit == RhythmFit::Crop {
             mask = mask.flex().flex_row().items_center();
         }
 
@@ -120,7 +149,7 @@ impl RenderOnce for RhythmFrame {
             .child(FrameSizer {
                 grid: self.grid,
                 ratio: self.ratio,
-                crop: self.crop,
+                fit: self.fit,
             })
             .child(mask.child(natural))
     }
@@ -131,17 +160,16 @@ impl RenderOnce for RhythmFrame {
 struct FrameSizer {
     grid: RhythmGrid,
     ratio: f32,
-    crop: bool,
+    fit: RhythmFit,
 }
 
 /// The frame height at `width`: the natural `width / ratio` snapped to whole
 /// rhythm rows — up for pad, down for crop.
-fn snapped_height(grid: RhythmGrid, ratio: f32, crop: bool, width: Pixels) -> Pixels {
+fn snapped_height(grid: RhythmGrid, ratio: f32, fit: RhythmFit, width: Pixels) -> Pixels {
     let natural = px(f32::from(width) / ratio);
-    if crop {
-        grid.snap_down(natural)
-    } else {
-        grid.snap_up(natural)
+    match fit {
+        RhythmFit::Pad => grid.snap_up(natural),
+        RhythmFit::Crop => grid.snap_down(natural),
     }
 }
 
@@ -174,7 +202,7 @@ impl Element for FrameSizer {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let grid = self.grid;
         let ratio = self.ratio;
-        let crop = self.crop;
+        let fit = self.fit;
         let mut style = Style::default();
         style.size.width = relative(1.).into();
         // Taffy may probe with min-/max-content available space; without a
@@ -186,7 +214,7 @@ impl Element for FrameSizer {
                 AvailableSpace::MinContent | AvailableSpace::MaxContent => None,
             });
             match width {
-                Some(width) => size(width, snapped_height(grid, ratio, crop, width)),
+                Some(width) => size(width, snapped_height(grid, ratio, fit, width)),
                 None => Size::default(),
             }
         });
@@ -225,22 +253,40 @@ mod tests {
     fn snapped_height_pads_up_and_crops_down() {
         let grid = RhythmGrid::new(px(8.0));
         // 800px wide at 16:9 → 450px natural height.
-        assert_eq!(snapped_height(grid, 16. / 9., false, px(800.0)), px(456.0));
-        assert_eq!(snapped_height(grid, 16. / 9., true, px(800.0)), px(448.0));
+        assert_eq!(
+            snapped_height(grid, 16. / 9., RhythmFit::Pad, px(800.0)),
+            px(456.0)
+        );
+        assert_eq!(
+            snapped_height(grid, 16. / 9., RhythmFit::Crop, px(800.0)),
+            px(448.0)
+        );
         // Exact multiples pass through untouched in both modes.
-        assert_eq!(snapped_height(grid, 2.0, false, px(96.0)), px(48.0));
-        assert_eq!(snapped_height(grid, 2.0, true, px(96.0)), px(48.0));
+        assert_eq!(
+            snapped_height(grid, 2.0, RhythmFit::Pad, px(96.0)),
+            px(48.0)
+        );
+        assert_eq!(
+            snapped_height(grid, 2.0, RhythmFit::Crop, px(96.0)),
+            px(48.0)
+        );
     }
 
     #[test]
-    fn frame_collects_children_and_the_crop_flag() {
+    fn frame_collects_children_and_the_fit_mode() {
         let grid = RhythmGrid::new(px(8.0));
         let mut frame = rhythm_frame(grid, 16. / 9.);
-        assert!(!frame.crop);
+        assert_eq!(frame.fit, RhythmFit::Pad);
         frame.extend([gpui::Empty.into_any_element()]);
         let frame = frame.crop();
-        assert!(frame.crop);
+        assert_eq!(frame.fit, RhythmFit::Crop);
         assert_eq!(frame.children.len(), 1);
+        // The shorthand and the explicit mode are the same frame.
+        assert_eq!(rhythm_frame(grid, 2.0).crop().fit, RhythmFit::Crop);
+        assert_eq!(
+            rhythm_frame(grid, 2.0).fit(RhythmFit::Pad).fit,
+            RhythmFit::Pad
+        );
     }
 
     #[test]

@@ -52,8 +52,9 @@ The crate has two layers behind one package:
 
 - **`gpui` feature** (default) — the gpui integration: metric resolution through
   `TextSystem` (with `RhythmFontSpec` cache keys and the resolved `FontId`),
-  `Pixels`-typed spacing, drop caps, the fluid-width `RhythmFrame`, the
-  `RhythmStyled` extension, and the configurable `RhythmOverlay` debug grid.
+  `Pixels`-typed spacing, drop caps, the fluid-width `RhythmFrame` (with its
+  `RhythmFit` pad/crop mode), the `RhythmStyled` extension, and the
+  configurable `RhythmOverlay` debug grid.
 - **`default-features = false`** — only the dependency-free rhythm math
   (`Rhythm`, `FontRhythm`, `RhythmLineMetrics`, `RhythmBlockMetrics`,
   `DropCapRhythm`, `snap`, and height snapping). Any renderer that centers
@@ -136,10 +137,12 @@ The example is a recipe collection:
   `rhythm_frame(grid, ratio)`, where `ratio` is width divided by height, fits it
   back on: the frame fills the parent's width and snaps its height
   (`width / ratio`) up to whole rhythm rows, leaving the sub-unit remainder
-  below the content; `.crop()` snaps down instead, clipping under one unit
-  evenly between the top and bottom edges without resizing the content to the
-  snapped height. Style the child to fill the frame's natural-ratio content box
-  — use `.size_full().object_fit(ObjectFit::Cover)` when the image itself has a
+  below the content; `.fit(RhythmFit::Crop)` — or the `.crop()` shorthand —
+  snaps down instead, clipping under one unit evenly between the top and
+  bottom edges without resizing the content to the snapped height. Taking the
+  mode as a value keeps a runtime choice a single call. Style the child to
+  fill the frame's natural-ratio content box — use
+  `.size_full().object_fit(ObjectFit::Cover)` when the image itself has a
   different ratio.
   Toggle pad/crop in the example and resize the window: the mixed-font row
   below stays in rhythm at every width. With a known column width, skip the

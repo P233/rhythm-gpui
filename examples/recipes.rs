@@ -21,7 +21,7 @@ use gpui::{
     FocusHandle, FontStyle, FontWeight, KeyBinding, ObjectFit, Pixels, TextRun, TextSystem, Window,
     WindowBounds, WindowOptions,
 };
-use rhythm_gpui::{rhythm_frame, RhythmDropCap, RhythmFont, RhythmGrid, RhythmStyled};
+use rhythm_gpui::{rhythm_frame, RhythmDropCap, RhythmFit, RhythmFont, RhythmGrid, RhythmStyled};
 
 gpui::actions!(rhythm_recipes, [FocusNext, FocusPrevious]);
 
@@ -452,11 +452,14 @@ impl Demo {
     fn media_figure(&self) -> impl IntoElement {
         let image_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/placeholder.png");
         let image = img(image_path).size_full().object_fit(ObjectFit::Cover);
-        let frame = rhythm_frame(self.grid, 21. / 9.);
-        let frame = if self.crop_media { frame.crop() } else { frame };
+        let fit = if self.crop_media {
+            RhythmFit::Crop
+        } else {
+            RhythmFit::Pad
+        };
         div()
             .mt(self.set.body.baseline_bottom(3))
-            .child(frame.child(image))
+            .child(rhythm_frame(self.grid, 21. / 9.).fit(fit).child(image))
     }
 
     /// Four runs in different fonts and sizes on one shared alphabetic

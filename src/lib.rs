@@ -13,8 +13,9 @@
 //!
 //! - **`gpui`** (default) — the gpui integration: `RhythmGrid`, `RhythmFont`
 //!   (with `RhythmFontSpec` cache keys), `RhythmDropCap`, the `RhythmStyled`
-//!   extension trait, the `rhythm_frame` media container, and the configurable
-//!   `rhythm_overlay` / `RhythmOverlay` debug grid.
+//!   extension trait, the `rhythm_frame` media container (with the `RhythmFit`
+//!   pad/crop mode), and the configurable `rhythm_overlay` / `RhythmOverlay`
+//!   debug grid.
 //! - Disable default features to build only the dependency-free rhythm math
 //!   ([`Rhythm`], [`FontRhythm`], [`RhythmLineMetrics`], [`RhythmBlockMetrics`],
 //!   [`DropCapRhythm`], [`snap`]), usable from any renderer that centers
@@ -101,7 +102,7 @@ mod integration;
 
 #[cfg(feature = "gpui")]
 #[cfg_attr(docsrs, doc(cfg(feature = "gpui")))]
-pub use frame::{rhythm_frame, RhythmFrame};
+pub use frame::{rhythm_frame, RhythmFit, RhythmFrame};
 #[cfg(feature = "gpui")]
 #[cfg_attr(docsrs, doc(cfg(feature = "gpui")))]
 pub use integration::{
