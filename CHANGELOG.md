@@ -5,12 +5,35 @@
 API reshaped along the ownership chain: a `RhythmFont` already carries its
 grid, so spacing now comes from the font itself and the grid acts as the
 factory. Passing the grid alongside a font — and the runtime mismatch panic
-that guarded it — is gone from the new paths.
+that guarded it — is gone.
 
 - Spacing moved to `RhythmFont`: `font.baseline_top(n)`,
   `font.baseline_bottom(n)`, `above.baseline_between(&below, n)`,
-  `font.cap_top(n)`, `font.cap_bottom(m)`. The `RhythmGrid` equivalents are
-  deprecated and forward to the new methods.
+  `font.cap_top(n)`, `font.cap_bottom(m)`. The `RhythmGrid` equivalents —
+  which took a font alongside the grid and panicked when the two disagreed —
+  are removed, and with them the grid/font mismatch check they existed to
+  guard. Two grid-agreement checks remain, both where two values that each
+  carry a grid meet: `RhythmFont::baseline_between` and
+  `RhythmLineMetrics::covering`. Everywhere else the mismatch is now
+  unrepresentable rather than checked for.
+- The dependency-free layer follows the same split:
+  `FontRhythm::baseline_top(grid, n)`, `baseline_bottom(grid, n)`,
+  `baseline_between(grid, &below, n)`, `cap_top(grid, n)` and
+  `cap_bottom(grid, n)` replace the `Rhythm` methods of those names. `Rhythm`
+  is now purely the grid — size, spacing, height, snapping — and every
+  font-dependent geometry lives on `FontRhythm`. A `FontRhythm` carries no
+  grid, so this moves the receiver rather than removing an argument; the gain
+  is that one rule now says where a calculation lives. `FontRhythm::drop_cap`
+  takes the grid first for the same reason: every `FontRhythm` method that
+  needs a grid now names it in the same position.
+- `FontRhythm::with_cap_height` / `with_x_height` are removed.
+  `from_platform_metrics` already supplies both heights alongside the metrics
+  they belong to, and the setters were a second entry into the same state.
+  Pass `0.0` for a height you do not have — non-finite and non-positive cap
+  and x heights are treated as unavailable. From a bare baseline ratio, the
+  em-box formula `from_baseline_ratio` documents composes the same value:
+  `from_platform_metrics(size, rhythms, size * (1.0 - ratio), size * ratio,
+cap, x)`.
 - Factory constructors: `grid.font(ts, font, size, line_rhythms)` and
   `body.drop_cap(ts, font, lines)`. `RhythmFont::resolve` and
   `RhythmDropCap::resolve` remain as the explicit forms.
@@ -44,10 +67,10 @@ that is the whole of this addition:
   a grid line and still spans whole rhythm rows; `trim_top()` reports the
   invisible band between the line box and that ink. `RhythmFont` itself remains
   entirely determined by `RhythmFontSpec`, so ordinary resolved-font caches
-  carry no hidden measured/unmeasured state. The math layer needs nothing new
-  because `RhythmBlockMetrics::cap` already takes the anchored ink height as a
-  generic scalar — pass a character-face ascent instead of a cap height and it
-  yields the same opening and closing, plus row and fragment geometry.
+  carry no hidden measured/unmeasured state. The math layer needs nothing new:
+  `RhythmBlockMetrics::ink_anchored` takes an anchored ink ascent — a Latin cap
+  height or a CJK character-face ascent — and yields the same opening and
+  closing, plus row and fragment geometry.
   Measuring beats reading the font's `BASE` table: SimSong ships none, and
   Apple SD Gothic Neo's hangul overshoots its declared `icft` by 0.054 em,
   while PingFang SC and Toppan Bunkyu Gothic agree within 0.003 em. Pass a
@@ -63,9 +86,7 @@ that is the whole of this addition:
   resolved face.
 - Cap-anchor docs now warn that a CJK face's reported cap and x heights may
   describe no glyph at all: PingFang's `sCapHeight` 0.860 em is a copy of its
-  `sTypoAscender` while its `H` reaches 0.714 em. `RhythmBlockMetrics::cap`
-  documents its anchor scalar as generic ink height (a cap height or an ICF
-  ascent).
+  `sTypoAscender` while its `H` reaches 0.714 em.
 - Deliberately absent, each for a reason now in the README: no Latin/CJK
   layout mode (both scripts share one baseline; which leads is a per-block
   anchor choice), no cross-script size solver (a CJK face's own Latin is
@@ -120,7 +141,7 @@ advice:
   chosen line box. Factories: `RhythmGrid::line_metrics(ascent, descent, n)`,
   `RhythmFont::line_metrics()`, `FontRhythm::line_metrics(grid)`.
 - `RhythmBlockMetrics`: whole-row block geometry over one line's metrics —
-  baseline anchors (`new`) or cap-ink anchors (`cap`), opening/closing and
+  baseline anchors (`new`) or ink-top anchors (`ink_anchored`), opening/closing and
   first/middle/last fragment heights, `first_baseline`, the
   unit-explicit `top_rhythms`/`bottom_rhythms` anchor counts (matching
   `line_rhythms`, since the neighboring accessors return lengths), and exact
@@ -129,7 +150,7 @@ advice:
 - `RhythmBlockMetrics::first_rows` / `middle_rows` / `last_rows`: ordered
   integer cursor transitions that partition `rows` precisely across split
   blocks. Accumulate them in an `i64`; `baseline_at_row` restores a rebased
-  visible baseline without an `i32` saturation path and retains cap-anchor
+  visible baseline without an `i32` saturation path and retains ink-anchor
   phase.
 - `RhythmLineMetrics::at_least` and `RhythmGrid::line_metrics_at_least`: grow a
   dynamic line box when its configured height is a floor rather than a fixed
@@ -147,10 +168,12 @@ advice:
   `resolve_covering` grows only the line height — metrics, cap height, and
   baselines stay the primary face's, and the returned font's `spec()` still
   reproduces it.
-- `Pixels`-typed `_px` mirrors under the `gpui` feature for line and block
-  geometry, including the new wide-cursor `baseline_at_row_px`, so gpui callers
-  can keep lengths typed instead of unwrapping with `f32::from` and rewrapping
-  with `px`.
+- `Pixels`-typed `_px` mirrors under the `gpui` feature for the four values
+  that stay inside a paint path's `Pixels` chain: `line_height_px`,
+  `paint_origin_for_px`, `first_baseline_px`, and the new wide-cursor
+  `baseline_at_row_px`. The rest of the line and block geometry is read once
+  and deliberately not mirrored — one `px(...)` at the call site beats a
+  mirror per accessor.
 - Glyph-level fallback still needs no special handling: substituted glyphs
   never enter a line's shaped ascent (CoreText-verified).
 - `direct_paint` example: resolve a font set once — the body style covering

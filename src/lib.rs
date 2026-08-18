@@ -57,11 +57,12 @@
 //! explicit font runs, which is how lines mixing bold, inline code, CJK, or
 //! emoji faces actually shape — lay blocks out with [`RhythmBlockMetrics`],
 //! and place every baseline with `paint_origin_for`. Under the `gpui` feature,
-//! geometry has `Pixels`-typed `_px` mirrors so the paint path need not convert
-//! by hand. The `direct_paint` example is the complete non-virtualized
-//! shape/cache/paint recipe. A virtualizer additionally accumulates
-//! `first_rows` / `middle_rows` / `last_rows` in an `i64` and rebases that row
-//! cursor near the viewport before converting visible positions to `f32`.
+//! the four values that stay inside a paint path's `Pixels` chain have
+//! `Pixels`-typed `_px` mirrors. The `direct_paint` example is the complete
+//! non-virtualized shape/cache/paint recipe. A virtualizer additionally
+//! accumulates `first_rows` / `middle_rows` / `last_rows` in an `i64` and
+//! rebases that row cursor near the viewport before converting visible
+//! positions to `f32`.
 //!
 //! # Performance contract
 //!

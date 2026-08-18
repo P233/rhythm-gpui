@@ -256,10 +256,9 @@ pass for ink; probe with glyphs the resolved face actually covers. Always use
 the same `TextSystem` for measurement that resolved the `RhythmFont`.
 
 When a renderer already has a trusted character-face ascent, or its backend
-cannot measure one, call `RhythmBlockMetrics::cap` directly. Its ink scalar is
-generic despite the historical name: passing an ICF ascent produces the same
-opening, closing, row, and fragment geometry without adding measured state to
-`RhythmFont` or depending on gpui.
+cannot measure one, call `RhythmBlockMetrics::ink_anchored` directly. Passing
+an ICF ascent produces the same opening, closing, row, and fragment geometry
+without adding measured state to `RhythmFont` or depending on gpui.
 
 Like a cap anchor, this anchors **one** ink envelope: glyphs that reach it land
 on the line, shorter ones sit below — exactly as Latin lowercase sits below a
@@ -317,7 +316,7 @@ Document renderers that shape text themselves skip the element layer: build
 `RhythmLineMetrics` from each shaped line's real `ascent()` / `descent()` —
 the maxima over its explicit font runs, which is how lines mixing bold,
 inline code, CJK, or emoji faces actually shape — lay blocks out with
-`RhythmBlockMetrics` (baseline or cap-ink anchors, concrete fragment geometry,
+`RhythmBlockMetrics` (baseline or ink-top anchors, concrete fragment geometry,
 and exact integer row arithmetic), and place every baseline with
 `paint_origin_for(target)`. Glyph fallback needs no special handling:
 substituted glyphs never grow the line box.
@@ -347,10 +346,14 @@ rebase near the viewport rather than converting an enormous absolute row. A
 virtualizer therefore converts only visible positions instead of summing
 `f32` heights over thousands of blocks. The `direct_paint` example deliberately
 shows the non-virtualized whole-document path; a production virtualizer owns
-the absolute `i64` row and viewport-row origin needed for this rebase. Geometry
-also carries `Pixels`-typed `_px` mirrors (including `line_height_px`,
-`paint_origin_for_px`, `first_baseline_px`, and `baseline_at_row_px`) so gpui
-callers need not convert lengths by hand.
+the absolute `i64` row and viewport-row origin needed for this rebase. Four
+values carry `Pixels`-typed `_px` mirrors — `line_height_px`,
+`paint_origin_for_px`, `first_baseline_px`, and `baseline_at_row_px` — the ones
+that stay inside a paint path's `Pixels` chain: two reach
+`WrappedLine::paint`, and two are summed with grid lengths into the target
+baseline `paint_origin_for_px` consumes. The rest is read once and stays
+`f32`: `px(...)` at the call site is one conversion, where a mirror per
+accessor would double the surface to save it.
 
 The lifecycle contract: a `RhythmFont` is an immutable resolved value. Within
 the crate, only its resolution factories query the `TextSystem`; document

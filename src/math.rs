@@ -14,6 +14,11 @@
 //! a rhythm grid line. The cap-anchoring functions deliberately align the
 //! capitals' ink instead and preserve whole-row block height with a paired close.
 //!
+//! [`Rhythm`] is only the grid: unit size, spacing, whole-row heights, and
+//! snapping. Every calculation that also needs a typeface lives on
+//! [`FontRhythm`], and shaped-line geometry on
+//! [`RhythmLineMetrics`](crate::RhythmLineMetrics).
+//!
 //! All quantities are `f32` logical pixels; unit conversion (rems, device
 //! scale) belongs to the integration layer.
 //!
@@ -59,102 +64,6 @@ impl Rhythm {
     #[inline]
     pub fn height(&self, n: i32) -> f32 {
         self.spacing(n)
-    }
-
-    /// Spacing from an element's top edge up to the nth grid line above the first
-    /// baseline. Equivalent to rhythm-sass `baseline-top()` / `rhythm-bottom()`.
-    ///
-    /// Applied as `padding-top` (or `margin-top`), it makes the first baseline land
-    /// exactly `n` rhythm units below the grid line at the element's padding edge.
-    ///
-    /// The result is negative when `n × size` is smaller than the font's
-    /// [`baseline_above`](FontRhythm::baseline_above); a negative value is
-    /// meaningful as a margin but not as a padding, so pick `n` accordingly.
-    #[inline]
-    pub fn baseline_top(&self, font: &FontRhythm, n: i32) -> f32 {
-        self.height(n) - font.baseline_above(*self)
-    }
-
-    /// Spacing from an element's bottom edge down to the nth grid line below the
-    /// last baseline. Equivalent to rhythm-sass `baseline-bottom()` / `rhythm-top()`.
-    ///
-    /// The result is negative when `n × size` is smaller than the font's
-    /// [`baseline_below`](FontRhythm::baseline_below); a negative value is
-    /// meaningful as a margin but not as a padding, so pick `n` accordingly.
-    #[inline]
-    pub fn baseline_bottom(&self, font: &FontRhythm, n: i32) -> f32 {
-        self.height(n) - font.baseline_below(*self)
-    }
-
-    /// Spacing between two adjacent text blocks, measured from the bottom of the
-    /// above font's line box to the top of the below font's line box, such that the
-    /// two adjacent baselines are exactly `n` rhythm units apart.
-    /// Equivalent to rhythm-sass `baseline-between()`.
-    ///
-    /// The result is negative when `n` rhythm units cannot fit both fonts'
-    /// baseline distances; negative values overlap the blocks when applied.
-    #[inline]
-    pub fn baseline_between(&self, above: &FontRhythm, below: &FontRhythm, n: i32) -> f32 {
-        self.baseline_bottom(above, n) - below.baseline_above(*self)
-    }
-
-    /// Top spacing that lands the **cap ink top** — not the baseline — on the
-    /// nth grid line: `n × size − cap_trim_top`. The grid-woven analog of CSS
-    /// `text-box-trim: trim-start` with `text-box-edge: cap`, for openings
-    /// where the eye measures ink to edge (heroes, cards, page tops).
-    ///
-    /// The block's baselines shift off the grid by `cap_height mod size`;
-    /// close the block with [`Self::cap_bottom`] — not
-    /// [`Self::baseline_bottom`] — so it still occupies a whole number of
-    /// rhythm rows and everything after it stays in rhythm.
-    ///
-    /// `None` when `font` has no usable cap height. CJK faces report one
-    /// anyway, so on ideographic text this anchor returns `Some` while
-    /// trimming to the wrong ink: ideographs are not seated on the baseline,
-    /// and the envelope their ink is drawn to is the ideographic character
-    /// face, not a cap height. Anchor those with
-    /// [`RhythmBlockMetrics::cap`](crate::RhythmBlockMetrics::cap), whose ink
-    /// scalar is generic, or with `RhythmIcfAnchor::span` under the `gpui`
-    /// feature. Worse, the reported value need not describe any glyph:
-    /// PingFang SC publishes `sCapHeight` 0.860 em, a copy of its
-    /// `sTypoAscender`, while its Latin `H` actually reaches 0.714 em
-    /// (Hiragino Sans GB, by contrast, reports its true 0.766 em). Treat a
-    /// CJK face's cap and x heights as unverified.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rhythm_gpui::{FontRhythm, Rhythm};
-    ///
-    /// let grid = Rhythm::new(8.0);
-    /// // Georgia-like 28px heading on a 5-unit (40px) line.
-    /// let heading = FontRhythm::from_platform_metrics(28.0, 5, 25.68, -6.14, 19.40, 13.48);
-    ///
-    /// // Open: the capitals' ink starts exactly on the 3rd grid line…
-    /// let pt = grid.cap_top(&heading, 3).unwrap();
-    /// assert!((pt + heading.cap_trim_top(grid).unwrap() - grid.height(3)).abs() < 1e-3);
-    ///
-    /// // …and the paired closer returns the trim, so the block spans whole rows.
-    /// let pb = grid.cap_bottom(&heading, 0).unwrap();
-    /// let block = pt + heading.line_height(grid) + pb;
-    /// assert!((block - 64.0).abs() < 1e-3); // 8 whole rows: what follows stays in rhythm
-    /// ```
-    #[inline]
-    pub fn cap_top(&self, font: &FontRhythm, n: i32) -> Option<f32> {
-        Some(self.height(n) - font.cap_trim_top(*self)?)
-    }
-
-    /// Bottom spacing pairing [`Self::cap_top`]: `n × size + cap_trim_top`,
-    /// returning at the bottom exactly what `cap_top` trimmed at the top so
-    /// the block occupies a whole number of rhythm rows — for any number of
-    /// wrapped lines, since lines advance by whole rows. Equivalently, the
-    /// bottom edge lands `n + line_rhythms` units below the last line's cap
-    /// top.
-    ///
-    /// `None` when `font` has no usable cap height.
-    #[inline]
-    pub fn cap_bottom(&self, font: &FontRhythm, n: i32) -> Option<f32> {
-        Some(self.height(n) + font.cap_trim_top(*self)?)
     }
 
     /// The smallest whole number of rhythm rows covering `height` — the pad
@@ -349,22 +258,6 @@ impl FontRhythm {
         self.x_height
     }
 
-    /// Set the capital height above the baseline, enabling [`Self::cap_trim_top`].
-    /// Non-finite or non-positive values are treated as unavailable.
-    #[must_use]
-    pub fn with_cap_height(mut self, cap_height: f32) -> Self {
-        self.cap_height = usable_metric(cap_height);
-        self
-    }
-
-    /// Set the x-height above the baseline, enabling [`Self::x_trim_top`].
-    /// Non-finite or non-positive values are treated as unavailable.
-    #[must_use]
-    pub fn with_x_height(mut self, x_height: f32) -> Self {
-        self.x_height = usable_metric(x_height);
-        self
-    }
-
     /// The Plumber-style baseline ratio implied by these metrics.
     #[inline]
     pub fn baseline_ratio(&self) -> f32 {
@@ -410,6 +303,102 @@ impl FontRhythm {
         Some(self.baseline_above(grid) - self.x_height?)
     }
 
+    /// Spacing from an element's top edge up to the nth grid line above the first
+    /// baseline. Equivalent to rhythm-sass `baseline-top()` / `rhythm-bottom()`.
+    ///
+    /// Applied as `padding-top` (or `margin-top`), it makes the first baseline land
+    /// exactly `n` rhythm units below the grid line at the element's padding edge.
+    ///
+    /// The result is negative when `n × size` is smaller than
+    /// [`baseline_above`](Self::baseline_above); a negative value is meaningful
+    /// as a margin but not as a padding, so pick `n` accordingly.
+    #[inline]
+    pub fn baseline_top(&self, grid: Rhythm, n: i32) -> f32 {
+        grid.height(n) - self.baseline_above(grid)
+    }
+
+    /// Spacing from an element's bottom edge down to the nth grid line below the
+    /// last baseline. Equivalent to rhythm-sass `baseline-bottom()` / `rhythm-top()`.
+    ///
+    /// The result is negative when `n × size` is smaller than
+    /// [`baseline_below`](Self::baseline_below); a negative value is meaningful
+    /// as a margin but not as a padding, so pick `n` accordingly.
+    #[inline]
+    pub fn baseline_bottom(&self, grid: Rhythm, n: i32) -> f32 {
+        grid.height(n) - self.baseline_below(grid)
+    }
+
+    /// Spacing from a block set in this style down to a following block set in
+    /// `below`, measured from the bottom of this line box to the top of the
+    /// below font's line box, such that the two adjacent baselines are exactly
+    /// `n` rhythm units apart. Equivalent to rhythm-sass `baseline-between()`.
+    ///
+    /// The result is negative when `n` rhythm units cannot fit both fonts'
+    /// baseline distances; negative values overlap the blocks when applied.
+    #[inline]
+    pub fn baseline_between(&self, grid: Rhythm, below: &FontRhythm, n: i32) -> f32 {
+        self.baseline_bottom(grid, n) - below.baseline_above(grid)
+    }
+
+    /// Top spacing that lands the **cap ink top** — not the baseline — on the
+    /// nth grid line: `n × size − cap_trim_top`. The grid-woven analog of CSS
+    /// `text-box-trim: trim-start` with `text-box-edge: cap`, for openings
+    /// where the eye measures ink to edge (heroes, cards, page tops).
+    ///
+    /// The block's baselines shift off the grid by `cap_height mod size`;
+    /// close the block with [`Self::cap_bottom`] — not
+    /// [`Self::baseline_bottom`] — so it still occupies a whole number of
+    /// rhythm rows and everything after it stays in rhythm.
+    ///
+    /// `None` when this style has no usable cap height. CJK faces report one
+    /// anyway, so on ideographic text this anchor returns `Some` while
+    /// trimming to the wrong ink: ideographs are not seated on the baseline,
+    /// and the envelope their ink is drawn to is the ideographic character
+    /// face, not a cap height. Anchor those with
+    /// [`RhythmBlockMetrics::ink_anchored`](crate::RhythmBlockMetrics::ink_anchored),
+    /// or with `RhythmIcfAnchor::span` under the `gpui` feature. Worse, the
+    /// reported value need not describe any glyph:
+    /// PingFang SC publishes `sCapHeight` 0.860 em, a copy of its
+    /// `sTypoAscender`, while its Latin `H` actually reaches 0.714 em
+    /// (Hiragino Sans GB, by contrast, reports its true 0.766 em). Treat a
+    /// CJK face's cap and x heights as unverified.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rhythm_gpui::{FontRhythm, Rhythm};
+    ///
+    /// let grid = Rhythm::new(8.0);
+    /// // Georgia-like 28px heading on a 5-unit (40px) line.
+    /// let heading = FontRhythm::from_platform_metrics(28.0, 5, 25.68, -6.14, 19.40, 13.48);
+    ///
+    /// // Open: the capitals' ink starts exactly on the 3rd grid line…
+    /// let pt = heading.cap_top(grid, 3).unwrap();
+    /// assert!((pt + heading.cap_trim_top(grid).unwrap() - grid.height(3)).abs() < 1e-3);
+    ///
+    /// // …and the paired closer returns the trim, so the block spans whole rows.
+    /// let pb = heading.cap_bottom(grid, 0).unwrap();
+    /// let block = pt + heading.line_height(grid) + pb;
+    /// assert!((block - 64.0).abs() < 1e-3); // 8 whole rows: what follows stays in rhythm
+    /// ```
+    #[inline]
+    pub fn cap_top(&self, grid: Rhythm, n: i32) -> Option<f32> {
+        Some(grid.height(n) - self.cap_trim_top(grid)?)
+    }
+
+    /// Bottom spacing pairing [`Self::cap_top`]: `n × size + cap_trim_top`,
+    /// returning at the bottom exactly what `cap_top` trimmed at the top so
+    /// the block occupies a whole number of rhythm rows — for any number of
+    /// wrapped lines, since lines advance by whole rows. Equivalently, the
+    /// bottom edge lands `n + line_rhythms` units below the last line's cap
+    /// top.
+    ///
+    /// `None` when this style has no usable cap height.
+    #[inline]
+    pub fn cap_bottom(&self, grid: Rhythm, n: i32) -> Option<f32> {
+        Some(grid.height(n) + self.cap_trim_top(grid)?)
+    }
+
     /// This style's line placement on `grid` as a
     /// [`RhythmLineMetrics`](crate::RhythmLineMetrics) — the same value a
     /// shaped line produces, so a custom renderer can place single-style
@@ -442,7 +431,7 @@ impl FontRhythm {
     /// let grid = Rhythm::new(8.0);
     /// // Georgia-like metrics at 16px on a 3-unit (24px) line.
     /// let body = FontRhythm::from_platform_metrics(16.0, 3, 14.67, -3.51, 11.09, 7.70);
-    /// let cap = body.drop_cap(&body, 3, grid);
+    /// let cap = body.drop_cap(grid, &body, 3);
     ///
     /// // The capital spans two body lines plus the body cap height…
     /// let span = 2.0 * body.line_height(grid) + body.cap_height().unwrap();
@@ -455,7 +444,7 @@ impl FontRhythm {
     /// # Panics
     ///
     /// Panics when `lines` is zero or `lines × line_rhythms` overflows `u32`.
-    pub fn drop_cap(&self, cap: &FontRhythm, lines: u32, grid: Rhythm) -> DropCapRhythm {
+    pub fn drop_cap(&self, grid: Rhythm, cap: &FontRhythm, lines: u32) -> DropCapRhythm {
         assert!(lines > 0, "a drop cap must sink at least one line");
         let line_rhythms = self
             .line_rhythms
@@ -542,6 +531,18 @@ mod tests {
         FontRhythm::from_baseline_ratio(17.0, 3, NOTO_SERIF_RATIO)
     }
 
+    fn font_map_3_with_cap(cap_height: f32) -> FontRhythm {
+        let base = font_map_3();
+        FontRhythm::from_platform_metrics(
+            base.font_size(),
+            base.line_rhythms(),
+            base.ascent(),
+            base.descent(),
+            cap_height,
+            base.x_height().unwrap_or(0.0),
+        )
+    }
+
     fn font_map_5() -> FontRhythm {
         FontRhythm::from_baseline_ratio(12.0, 2, NOTO_SERIF_RATIO)
     }
@@ -592,15 +593,15 @@ mod tests {
     fn exact_functions_land_baseline_on_grid() {
         let font = font_map_3();
         // padding_top + renderer's baseline placement = exact grid multiple
-        let padding_top = GRID.baseline_top(&font, 3);
+        let padding_top = font.baseline_top(GRID, 3);
         assert!((padding_top + font.baseline_above(GRID) - GRID.height(3)).abs() < 1e-4);
 
-        let padding_bottom = GRID.baseline_bottom(&font, 3);
+        let padding_bottom = font.baseline_bottom(GRID, 3);
         assert!((padding_bottom + font.baseline_below(GRID) - GRID.height(3)).abs() < 1e-4);
 
         // Two stacked blocks: distance between adjacent baselines is n grid units.
         let below = font_map_5();
-        let gap = GRID.baseline_between(&font, &below, 3);
+        let gap = font.baseline_between(GRID, &below, 3);
         let baseline_distance = font.baseline_below(GRID) + gap + below.baseline_above(GRID);
         assert!((baseline_distance - GRID.height(3)).abs() < 1e-4);
     }
@@ -642,6 +643,31 @@ mod tests {
         assert_eq!(font.x_height(), Some(7.5));
     }
 
+    /// Pins CHANGELOG.md's 0.2 migration recipe: the documented em-box
+    /// composition must stay bit-identical to `from_baseline_ratio`.
+    #[test]
+    fn changelog_ratio_recipe_matches_from_baseline_ratio() {
+        let composed = FontRhythm::from_platform_metrics(
+            17.0,
+            3,
+            17.0 * (1.0 - NOTO_SERIF_RATIO),
+            17.0 * NOTO_SERIF_RATIO,
+            11.9,
+            8.5,
+        );
+        let plain = font_map_3();
+
+        assert_eq!(composed.font_size(), plain.font_size());
+        assert_eq!(composed.line_rhythms(), plain.line_rhythms());
+        assert_eq!(composed.ascent(), plain.ascent());
+        assert_eq!(composed.descent(), plain.descent());
+        assert_eq!(composed.baseline_ratio(), plain.baseline_ratio());
+        // …while carrying the heights a bare ratio cannot express.
+        assert_eq!(composed.cap_height(), Some(11.9));
+        assert_eq!(composed.x_height(), Some(8.5));
+        assert_eq!(plain.cap_height(), None);
+    }
+
     #[test]
     #[should_panic(expected = "line_rhythms must be greater than zero")]
     fn zero_line_rhythms_are_rejected() {
@@ -656,7 +682,7 @@ mod tests {
 
     #[test]
     fn cap_trim() {
-        let font = font_map_3().with_cap_height(0.7 * 17.0);
+        let font = font_map_3_with_cap(0.7 * 17.0);
         let trim = font.cap_trim_top(GRID).unwrap();
         assert!((trim - (font.baseline_above(GRID) - 11.9)).abs() < 1e-4);
         assert_eq!(font_map_3().cap_trim_top(GRID), None);
@@ -726,7 +752,7 @@ mod tests {
     #[test]
     fn drop_cap_baseline_lands_on_the_sunk_line() {
         let body = georgia_16();
-        let cap = body.drop_cap(&body, 3, GRID);
+        let cap = body.drop_cap(GRID, &body, 3);
         assert_eq!(cap.metrics().line_rhythms(), 9);
         // The capital spans two body lines plus the body cap height…
         let span = 2.0 * body.line_height(GRID) + body.cap_height().unwrap();
@@ -741,7 +767,7 @@ mod tests {
         let body = georgia_16();
         // A display face with taller capitals: cap height 0.8 em.
         let display = FontRhythm::from_platform_metrics(12.0, 1, 11.0, -3.0, 9.6, 6.0);
-        let cap = body.drop_cap(&display, 3, GRID);
+        let cap = body.drop_cap(GRID, &display, 3);
         let span = 2.0 * body.line_height(GRID) + body.cap_height().unwrap();
         // Solved with the cap face's own ratio, not the body's.
         assert!((cap.metrics().font_size() - span / 0.8).abs() < 1e-3);
@@ -763,7 +789,7 @@ mod tests {
             16.0 * 1486.0 / 2000.0,
             16.0 * 1111.0 / 2000.0,
         );
-        let cap = body.drop_cap(&body, 3, GRID);
+        let cap = body.drop_cap(GRID, &body, 3);
         assert!(
             cap.top() > 1.0 && cap.top() < 1.1,
             "expected ≈ +1.03, got {}",
@@ -776,7 +802,7 @@ mod tests {
     #[test]
     fn drop_cap_falls_back_to_the_em_approximation() {
         let body = font_map_3(); // baseline-ratio construction: no cap height
-        let cap = body.drop_cap(&body, 2, GRID);
+        let cap = body.drop_cap(GRID, &body, 2);
         let expected_size = (body.line_height(GRID) + 0.7 * body.font_size()) / 0.7;
         assert!((cap.metrics().font_size() - expected_size).abs() < 1e-3);
         // The fallback is not fabricated into the solved metrics.
@@ -789,7 +815,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "at least one line")]
     fn drop_cap_rejects_zero_lines() {
-        let _ = font_map_3().drop_cap(&font_map_3(), 0, GRID);
+        let _ = font_map_3().drop_cap(GRID, &font_map_3(), 0);
     }
 
     #[test]
@@ -803,17 +829,17 @@ mod tests {
             28.0 * 1419.0 / 2048.0,
             28.0 * 986.0 / 2048.0,
         );
-        let pt = GRID.cap_top(&heading, 3).unwrap();
+        let pt = heading.cap_top(GRID, 3).unwrap();
         // The capitals' ink starts exactly on the 3rd grid line…
         assert!((pt + heading.cap_trim_top(GRID).unwrap() - GRID.height(3)).abs() < 1e-3);
         // …and the paired closer makes the block a whole number of rows.
-        let pb = GRID.cap_bottom(&heading, 0).unwrap();
+        let pb = heading.cap_bottom(GRID, 0).unwrap();
         let block = pt + heading.line_height(GRID) + pb;
         assert!((block - 64.0).abs() < 1e-3);
         // Closing with baseline_bottom instead would leave the fractional
         // cap-height phase inside the block and push everything below it
         // off the grid.
-        let mixed = pt + heading.line_height(GRID) + GRID.baseline_bottom(&heading, 1);
+        let mixed = pt + heading.line_height(GRID) + heading.baseline_bottom(GRID, 1);
         let rows = mixed / GRID.size();
         assert!((rows - rows.round()).abs() > 0.01);
     }
@@ -821,15 +847,8 @@ mod tests {
     #[test]
     fn cap_anchors_need_a_usable_cap_height() {
         let no_cap = font_map_3(); // baseline-ratio construction: no cap height
-        assert_eq!(GRID.cap_top(&no_cap, 3), None);
-        assert_eq!(GRID.cap_bottom(&no_cap, 1), None);
-    }
-
-    #[test]
-    fn optional_height_setters_filter_unusable_values() {
-        let from_setters = font_map_3().with_cap_height(f32::NAN).with_x_height(0.0);
-        assert_eq!(from_setters.cap_height(), None);
-        assert_eq!(from_setters.x_height(), None);
+        assert_eq!(no_cap.cap_top(GRID, 3), None);
+        assert_eq!(no_cap.cap_bottom(GRID, 1), None);
     }
 
     // PingFang SC Regular, read from the font file: upem 1000, hhea
@@ -852,15 +871,15 @@ mod tests {
     }
 
     /// The math layer needs no ideographic anchor of its own:
-    /// [`RhythmBlockMetrics::cap`] already takes the anchored ink height as a
-    /// generic scalar, so passing a character-face ascent instead of a cap
-    /// height lands ideographic ink and still spans whole rows.
+    /// [`RhythmBlockMetrics::ink_anchored`] takes the anchored ink height, so
+    /// passing a character-face ascent lands ideographic ink and still spans
+    /// whole rows.
     #[test]
     fn ideographic_ink_anchors_through_the_generic_block_metrics() {
         let font = pingfang(16.0, 3);
         let icf = PINGFANG_ICFT * 16.0;
         let line = font.line_metrics(GRID);
-        let block = crate::RhythmBlockMetrics::cap(line, icf, 3, 0);
+        let block = crate::RhythmBlockMetrics::ink_anchored(line, icf, 3, 0);
 
         // The character face's top edge starts exactly on the 3rd grid line…
         let trim = font.baseline_above(GRID) - icf;
@@ -871,7 +890,7 @@ mod tests {
 
         // Closing with a baseline anchor instead would leave the fractional
         // character-face phase inside the block.
-        let mixed = block.opening() + font.line_height(GRID) + GRID.baseline_bottom(&font, 1);
+        let mixed = block.opening() + font.line_height(GRID) + font.baseline_bottom(GRID, 1);
         let rows = mixed / GRID.size();
         assert!((rows - rows.round()).abs() > 0.01);
     }
@@ -888,9 +907,9 @@ mod tests {
         let icf = PINGFANG_ICFT * 16.0;
         let ink_top = 0.825 * 16.0;
 
-        let cap_anchor = GRID.cap_top(&font, 3).unwrap();
+        let cap_anchor = font.cap_top(GRID, 3).unwrap();
         let face_anchor =
-            crate::RhythmBlockMetrics::cap(font.line_metrics(GRID), icf, 3, 0).opening();
+            crate::RhythmBlockMetrics::ink_anchored(font.line_metrics(GRID), icf, 3, 0).opening();
         assert!(
             face_anchor < cap_anchor,
             "the character face sits above the reported cap height"
@@ -915,13 +934,13 @@ mod tests {
         assert!((16.0 + trim - 24.912).abs() < 1e-3);
 
         // The anchored pair lands the ink and still spans whole rows.
-        let block = crate::RhythmBlockMetrics::cap(heading.line_metrics(GRID), icf, 2, 0);
+        let block = crate::RhythmBlockMetrics::ink_anchored(heading.line_metrics(GRID), icf, 2, 0);
         assert!((block.opening() - 7.088).abs() < 1e-3);
         assert!((block.opening() + trim - 16.0).abs() < 1e-3);
         assert!((block.height(1) - 56.0).abs() < 1e-3);
         assert_eq!(block.rows(1), 7);
 
         // The cap anchor misses by PingFang's reported cap height.
-        assert!((GRID.cap_top(&heading, 2).unwrap() + trim - 16.912).abs() < 1e-3);
+        assert!((heading.cap_top(GRID, 2).unwrap() + trim - 16.912).abs() < 1e-3);
     }
 }

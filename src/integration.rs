@@ -83,18 +83,12 @@ impl RhythmGrid {
     }
 
     /// This grid as the dependency-free [`Rhythm`] — the entry to the math
-    /// layer, mirroring [`RhythmFont::metrics`] for fonts. Use it to reach
-    /// [`Rhythm`] methods with values already held as [`FontRhythm`].
+    /// layer, mirroring [`RhythmFont::metrics`] for fonts. Use it to hand this
+    /// grid to the `f32` layer: [`FontRhythm`] geometry takes it per call, and
+    /// [`RhythmLineMetrics`] takes it once at construction.
     #[inline]
     pub const fn rhythm(&self) -> Rhythm {
         self.core
-    }
-
-    fn assert_font(&self, font: &RhythmFont) {
-        assert_eq!(
-            *self, font.grid,
-            "RhythmFont must use the same grid size as the spacing calculation"
-        );
     }
 
     /// Axis-neutral length of `n` rhythm units. Use this for horizontal
@@ -190,107 +184,22 @@ impl RhythmGrid {
     pub fn overlay(&self, color: impl Into<Hsla>) -> RhythmOverlay {
         rhythm_overlay(*self, color)
     }
-
-    /// Deprecated form of [`RhythmFont::baseline_top`].
-    ///
-    /// # Panics
-    ///
-    /// Panics when `font` was resolved against a different grid size.
-    #[deprecated(since = "0.2.0", note = "use `RhythmFont::baseline_top`")]
-    #[inline]
-    pub fn baseline_top(&self, font: &RhythmFont, n: i32) -> Pixels {
-        self.assert_font(font);
-        font.baseline_top(n)
-    }
-
-    /// Deprecated form of [`RhythmFont::baseline_bottom`].
-    ///
-    /// # Panics
-    ///
-    /// Panics when `font` was resolved against a different grid size.
-    #[deprecated(since = "0.2.0", note = "use `RhythmFont::baseline_bottom`")]
-    #[inline]
-    pub fn baseline_bottom(&self, font: &RhythmFont, n: i32) -> Pixels {
-        self.assert_font(font);
-        font.baseline_bottom(n)
-    }
-
-    /// Deprecated form of [`RhythmFont::baseline_between`].
-    ///
-    /// # Panics
-    ///
-    /// Panics when `above` or `below` was resolved against a different grid size.
-    #[deprecated(since = "0.2.0", note = "use `RhythmFont::baseline_between`")]
-    #[inline]
-    pub fn baseline_between(&self, above: &RhythmFont, below: &RhythmFont, n: i32) -> Pixels {
-        self.assert_font(above);
-        above.baseline_between(below, n)
-    }
-
-    /// Deprecated form of [`RhythmFont::cap_top`].
-    ///
-    /// # Panics
-    ///
-    /// Panics when `font` was resolved against a different grid size.
-    #[deprecated(since = "0.2.0", note = "use `RhythmFont::cap_top`")]
-    #[inline]
-    pub fn cap_top(&self, font: &RhythmFont, n: i32) -> Option<Pixels> {
-        self.assert_font(font);
-        font.cap_top(n)
-    }
-
-    /// Deprecated form of [`RhythmFont::cap_bottom`].
-    ///
-    /// # Panics
-    ///
-    /// Panics when `font` was resolved against a different grid size.
-    #[deprecated(since = "0.2.0", note = "use `RhythmFont::cap_bottom`")]
-    #[inline]
-    pub fn cap_bottom(&self, font: &RhythmFont, n: i32) -> Option<Pixels> {
-        self.assert_font(font);
-        font.cap_bottom(n)
-    }
 }
 
-/// `Pixels`-typed mirrors of shaped-line geometry, so a gpui paint path can
-/// keep lengths typed across the integration boundary. Row counts remain
-/// integers because they identify grid rows rather than pixel lengths.
+/// `Pixels`-typed mirrors of the two line values that stay inside a paint
+/// path's `Pixels` chain: both reach `WrappedLine::paint`.
+///
+/// Only four values across this type and [`RhythmBlockMetrics`] are mirrored.
+/// The rest of the `f32` surface is read once and converted once, so it is not
+/// mirrored: `px(line.ascent())` at the call site is one conversion, while a
+/// mirror per accessor doubles the surface to save it. Row counts are never
+/// mirrored because they identify grid rows rather than pixel lengths.
 impl RhythmLineMetrics {
-    /// [`ascent`](Self::ascent) in `Pixels`.
-    #[inline]
-    pub fn ascent_px(&self) -> Pixels {
-        px(self.ascent())
-    }
-
-    /// [`descent`](Self::descent) in `Pixels`.
-    #[inline]
-    pub fn descent_px(&self) -> Pixels {
-        px(self.descent())
-    }
-
     /// [`line_height`](Self::line_height) in `Pixels` — the value
     /// `WrappedLine::paint` takes.
     #[inline]
     pub fn line_height_px(&self) -> Pixels {
         px(self.line_height())
-    }
-
-    /// [`half_leading`](Self::half_leading) in `Pixels`.
-    #[inline]
-    pub fn half_leading_px(&self) -> Pixels {
-        px(self.half_leading())
-    }
-
-    /// [`baseline_above`](Self::baseline_above) in `Pixels`.
-    #[inline]
-    pub fn baseline_above_px(&self) -> Pixels {
-        px(self.baseline_above())
-    }
-
-    /// [`baseline_below`](Self::baseline_below) in `Pixels`.
-    #[inline]
-    pub fn baseline_below_px(&self) -> Pixels {
-        px(self.baseline_below())
     }
 
     /// [`paint_origin_for`](Self::paint_origin_for) in `Pixels` — the
@@ -301,21 +210,11 @@ impl RhythmLineMetrics {
     }
 }
 
-/// `Pixels`-typed mirrors of block geometry; see the [`RhythmLineMetrics`]
+/// `Pixels`-typed mirrors of the two block values that stay inside a paint
+/// path's `Pixels` chain: both are summed with grid lengths into the target
+/// baseline [`RhythmLineMetrics::paint_origin_for_px`] consumes. See those
 /// mirrors for the integration-boundary rule.
 impl RhythmBlockMetrics {
-    /// [`opening`](Self::opening) in `Pixels`.
-    #[inline]
-    pub fn opening_px(&self) -> Pixels {
-        px(self.opening())
-    }
-
-    /// [`closing`](Self::closing) in `Pixels`.
-    #[inline]
-    pub fn closing_px(&self) -> Pixels {
-        px(self.closing())
-    }
-
     /// [`first_baseline`](Self::first_baseline) in `Pixels`.
     #[inline]
     pub fn first_baseline_px(&self) -> Pixels {
@@ -326,46 +225,6 @@ impl RhythmBlockMetrics {
     #[inline]
     pub fn baseline_at_row_px(&self, row: i64) -> Pixels {
         px(self.baseline_at_row(row))
-    }
-
-    /// [`height`](Self::height) in `Pixels`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `lines` is zero.
-    #[inline]
-    pub fn height_px(&self, lines: u32) -> Pixels {
-        px(self.height(lines))
-    }
-
-    /// [`first_height`](Self::first_height) in `Pixels`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `lines` is zero.
-    #[inline]
-    pub fn first_height_px(&self, lines: u32) -> Pixels {
-        px(self.first_height(lines))
-    }
-
-    /// [`middle_height`](Self::middle_height) in `Pixels`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `lines` is zero.
-    #[inline]
-    pub fn middle_height_px(&self, lines: u32) -> Pixels {
-        px(self.middle_height(lines))
-    }
-
-    /// [`last_height`](Self::last_height) in `Pixels`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `lines` is zero.
-    #[inline]
-    pub fn last_height_px(&self, lines: u32) -> Pixels {
-        px(self.last_height(lines))
     }
 }
 
@@ -471,11 +330,11 @@ impl RhythmIcfAnchor {
     /// whole rhythm rows for any number of wrapped lines.
     ///
     /// A renderer that already has a trusted character-face ascent — or cannot
-    /// measure one through gpui — can call [`RhythmBlockMetrics::cap`] directly;
-    /// its anchored-ink scalar is generic despite the historical name.
+    /// measure one through gpui — can call
+    /// [`RhythmBlockMetrics::ink_anchored`] directly.
     #[inline]
     pub fn span(&self, top: i32, bottom: i32) -> (Pixels, Pixels) {
-        let block = RhythmBlockMetrics::cap(
+        let block = RhythmBlockMetrics::ink_anchored(
             self.font.line_metrics(),
             f32::from(self.ascent),
             top,
@@ -699,7 +558,7 @@ impl RhythmFont {
     /// as a padding.
     #[inline]
     pub fn baseline_top(&self, n: i32) -> Pixels {
-        px(self.grid.rhythm().baseline_top(&self.metrics, n))
+        px(self.metrics.baseline_top(self.grid.rhythm(), n))
     }
 
     /// Bottom spacing that puts the nth grid line below the last baseline at
@@ -710,7 +569,7 @@ impl RhythmFont {
     /// distance — meaningful as a margin, not as a padding.
     #[inline]
     pub fn baseline_bottom(&self, n: i32) -> Pixels {
-        px(self.grid.rhythm().baseline_bottom(&self.metrics, n))
+        px(self.metrics.baseline_bottom(self.grid.rhythm(), n))
     }
 
     /// Spacing from a block set in this font down to a following block set in
@@ -732,15 +591,14 @@ impl RhythmFont {
             "both fonts must be resolved against the same grid size"
         );
         px(self
-            .grid
-            .rhythm()
-            .baseline_between(&self.metrics, &below.metrics, n))
+            .metrics
+            .baseline_between(self.grid.rhythm(), &below.metrics, n))
     }
 
     /// Top spacing that lands the capitals' ink top — not the baseline — on
     /// the nth grid line, for optically-aligned openings. Close the block
     /// with [`Self::cap_bottom`], not [`Self::baseline_bottom`]; see
-    /// [`Rhythm::cap_top`] for the contract, or use [`Self::cap_span`] to get
+    /// [`FontRhythm::cap_top`] for the contract, or use [`Self::cap_span`] to get
     /// the pair in one call. `None` when the font has no usable cap height.
     ///
     /// CJK faces usually resolve with a cap height — for their embedded Latin
@@ -748,15 +606,15 @@ impl RhythmFont {
     /// the wrong ink; use [`Self::measure_icf`] for CJK openings.
     #[inline]
     pub fn cap_top(&self, n: i32) -> Option<Pixels> {
-        self.grid.rhythm().cap_top(&self.metrics, n).map(px)
+        self.metrics.cap_top(self.grid.rhythm(), n).map(px)
     }
 
     /// Bottom spacing pairing [`Self::cap_top`], returning the trimmed space
-    /// so the block closes on whole rhythm rows; see [`Rhythm::cap_bottom`].
+    /// so the block closes on whole rhythm rows; see [`FontRhythm::cap_bottom`].
     /// `None` when the font has no usable cap height.
     #[inline]
     pub fn cap_bottom(&self, n: i32) -> Option<Pixels> {
-        self.grid.rhythm().cap_bottom(&self.metrics, n).map(px)
+        self.metrics.cap_bottom(self.grid.rhythm(), n).map(px)
     }
 
     /// The cap-anchored opening as one paired value:
@@ -1067,7 +925,7 @@ impl RhythmDropCap {
         let probe = RhythmFont::resolve(text_system, font.clone(), body.font_size(), 1, body.grid);
         let solved = body
             .metrics()
-            .drop_cap(probe.metrics(), lines, body.grid.rhythm());
+            .drop_cap(body.grid.rhythm(), probe.metrics(), lines);
         Self {
             font: RhythmFont {
                 font,
@@ -1351,12 +1209,7 @@ mod tests {
         assert_eq!(grid.spacing(5), px(40.0));
         assert_eq!(grid.height(5), grid.spacing(5));
         let line = grid.line_metrics(px(14.67), px(3.51), 3);
-        assert_eq!(line.ascent_px(), px(line.ascent()));
-        assert_eq!(line.descent_px(), px(line.descent()));
         assert_eq!(line.line_height_px(), px(line.line_height()));
-        assert_eq!(line.half_leading_px(), px(line.half_leading()));
-        assert_eq!(line.baseline_above_px(), px(line.baseline_above()));
-        assert_eq!(line.baseline_below_px(), px(line.baseline_below()));
 
         let target = grid.height(5);
         assert_eq!(
@@ -1365,18 +1218,12 @@ mod tests {
         );
 
         let block = RhythmBlockMetrics::new(line, 3, 1);
-        assert_eq!(block.opening_px(), px(block.opening()));
-        assert_eq!(block.closing_px(), px(block.closing()));
         assert_eq!(block.first_baseline_px(), px(block.first_baseline()));
         let wide_row = i64::from(i32::MAX) * 4;
         assert_eq!(
             block.baseline_at_row_px(wide_row),
             px(block.baseline_at_row(wide_row))
         );
-        assert_eq!(block.height_px(5), px(block.height(5)));
-        assert_eq!(block.first_height_px(2), px(block.first_height(2)));
-        assert_eq!(block.middle_height_px(4), px(block.middle_height(4)));
-        assert_eq!(block.last_height_px(3), px(block.last_height(3)));
     }
 
     #[test]
@@ -1392,6 +1239,35 @@ mod tests {
             grid.line_metrics_covering(&[body, display]),
             RhythmLineMetrics::covering(&[body, display], body.grid())
         );
+    }
+
+    #[test]
+    fn spacing_methods_agree_with_the_math_layer() {
+        // Each assertion names the math method the gpui form must reach, so a
+        // forwarder wired to its sibling (top to bottom, cap to baseline)
+        // fails here even though every value stays self-consistent.
+        let grid = RhythmGrid::new(px(8.0));
+        let rhythm = grid.rhythm();
+        let metrics = FontRhythm::from_platform_metrics(16.0, 3, 14.67, -3.51, 11.09, 7.70);
+        let body = RhythmFont {
+            font: font("Example Serif"),
+            font_id: None,
+            metrics,
+            grid,
+        };
+        let below = RhythmFont::from_baseline_ratio(font("Example Serif"), px(24.0), 4, 0.2, grid);
+
+        assert_eq!(body.baseline_top(3), px(metrics.baseline_top(rhythm, 3)));
+        assert_eq!(
+            body.baseline_bottom(1),
+            px(metrics.baseline_bottom(rhythm, 1))
+        );
+        assert_eq!(
+            body.baseline_between(&below, 6),
+            px(metrics.baseline_between(rhythm, below.metrics(), 6))
+        );
+        assert_eq!(body.cap_top(3), metrics.cap_top(rhythm, 3).map(px));
+        assert_eq!(body.cap_bottom(0), metrics.cap_bottom(rhythm, 0).map(px));
     }
 
     #[test]
@@ -1487,7 +1363,7 @@ mod tests {
     fn rhythm_drop_cap_anchors_with_a_relative_inset_not_a_margin() {
         let grid = RhythmGrid::new(px(8.0));
         let body = RhythmFont::from_baseline_ratio(font("Example Serif"), px(16.0), 3, 0.2, grid);
-        let solved = body.metrics().drop_cap(body.metrics(), 3, Rhythm::new(8.0));
+        let solved = body.metrics().drop_cap(Rhythm::new(8.0), body.metrics(), 3);
         let cap = RhythmDropCap {
             font: RhythmFont {
                 font: font("Example Serif"),
@@ -1525,35 +1401,6 @@ mod tests {
         );
 
         above.baseline_between(&below, 3);
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn deprecated_grid_spacing_matches_the_font_methods() {
-        let grid = RhythmGrid::new(px(8.0));
-        let body = RhythmFont::from_baseline_ratio(font("Example Serif"), px(16.0), 3, 0.2, grid);
-
-        assert_eq!(grid.baseline_top(&body, 3), body.baseline_top(3));
-        assert_eq!(grid.baseline_bottom(&body, 1), body.baseline_bottom(1));
-        assert_eq!(
-            grid.baseline_between(&body, &body, 6),
-            body.baseline_between(&body, 6)
-        );
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    #[should_panic(expected = "RhythmFont must use the same grid size")]
-    fn deprecated_spacing_still_rejects_a_mismatched_grid() {
-        let font = RhythmFont::from_baseline_ratio(
-            font("Example Serif"),
-            px(16.0),
-            3,
-            0.2,
-            RhythmGrid::new(px(8.0)),
-        );
-
-        RhythmGrid::new(px(10.0)).baseline_top(&font, 3);
     }
 
     #[test]
@@ -1599,7 +1446,8 @@ mod tests {
         // through the block metrics; pinning both to the same value keeps the
         // two ink-anchor paths from drifting apart.
         let line = metrics.line_metrics(grid.rhythm());
-        let block = RhythmBlockMetrics::cap(line, metrics.cap_height().expect("cap height"), 3, 0);
+        let block =
+            RhythmBlockMetrics::ink_anchored(line, metrics.cap_height().expect("cap height"), 3, 0);
         assert!((f32::from(pt) - block.opening()).abs() < 1e-4);
         assert!((f32::from(pb) - block.closing()).abs() < 1e-4);
     }
@@ -1661,7 +1509,7 @@ mod tests {
 
         let (pt, pb) = anchor.span(3, 0);
         let line = body.metrics().line_metrics(grid.rhythm());
-        let block = RhythmBlockMetrics::cap(line, PINGFANG_ICF_16, 3, 0);
+        let block = RhythmBlockMetrics::ink_anchored(line, PINGFANG_ICF_16, 3, 0);
         assert!((f32::from(pt) - block.opening()).abs() < 1e-4);
         assert!((f32::from(pb) - block.closing()).abs() < 1e-4);
     }

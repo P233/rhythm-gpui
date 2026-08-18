@@ -7,7 +7,7 @@
 //! result (in gpui, the maximum over the line's explicit font runs). A line
 //! mixing bold, italic, inline code, or explicit CJK/emoji fonts keeps one
 //! baseline placed from those maxima, so only shaped metrics can land it on
-//! the grid. [`RhythmBlockMetrics`] combines a line with baseline or cap-ink
+//! the grid. [`RhythmBlockMetrics`] combines a line with baseline or ink-top
 //! anchors into whole-row block geometry, with the exact row arithmetic a
 //! virtualized renderer needs.
 //!
@@ -288,9 +288,10 @@ impl RhythmLineMetrics {
 }
 
 /// A text block on the rhythm grid as pure geometry: one line's metrics plus
-/// baseline or cap-ink anchors, with both fragment geometry and the exact row
+/// baseline or ink-top anchors, with both fragment geometry and the exact row
 /// arithmetic a virtualized renderer needs. [`new`](Self::new) is the pure
-/// form of `rhythm_block`; [`cap`](Self::cap) pairs `cap_top` with `cap_bottom`.
+/// form of `rhythm_block`; [`ink_anchored`](Self::ink_anchored) pairs an ink
+/// opening with its whole-row close.
 /// Either mode spans a whole number of rhythm rows for any number of lines, so
 /// blocks and fragments compose without breaking the page rhythm.
 ///
@@ -328,7 +329,7 @@ pub struct RhythmBlockMetrics {
     line: RhythmLineMetrics,
     top: i32,
     bottom: i32,
-    cap_height: Option<f32>,
+    ink_ascent: Option<f32>,
 }
 
 impl RhythmBlockMetrics {
@@ -340,31 +341,31 @@ impl RhythmBlockMetrics {
             line,
             top,
             bottom,
-            cap_height: None,
+            ink_ascent: None,
         }
     }
 
-    /// A cap-anchored block: opens `top` rhythm units above the capitals' ink
-    /// top and closes with the paired trimmed space, retaining the cap phase
+    /// An ink-anchored block: opens `top` rhythm units above the anchored ink
+    /// top and closes with the paired trimmed space, retaining that ink phase
     /// across fragments while the whole block still spans integer rows.
     ///
-    /// `cap_height` is generically the anchored ink's height above the
-    /// baseline: pass a Latin cap height, or a caller-supplied CJK ICF ascent
-    /// to anchor the ideographic character face instead.
+    /// `ink_ascent` is the anchored ink's height above the baseline: pass a
+    /// Latin cap height, or a caller-supplied CJK ICF ascent to anchor the
+    /// ideographic character face instead.
     ///
     /// # Panics
     ///
-    /// Panics when `cap_height` is zero, negative, or non-finite.
-    pub fn cap(line: RhythmLineMetrics, cap_height: f32, top: i32, bottom: i32) -> Self {
+    /// Panics when `ink_ascent` is zero, negative, or non-finite.
+    pub fn ink_anchored(line: RhythmLineMetrics, ink_ascent: f32, top: i32, bottom: i32) -> Self {
         assert!(
-            cap_height.is_finite() && cap_height > 0.0,
-            "cap height must be finite and greater than zero"
+            ink_ascent.is_finite() && ink_ascent > 0.0,
+            "ink anchor ascent must be finite and greater than zero"
         );
         Self {
             line,
             top,
             bottom,
-            cap_height: Some(cap_height),
+            ink_ascent: Some(ink_ascent),
         }
     }
 
@@ -374,7 +375,7 @@ impl RhythmBlockMetrics {
         self.line
     }
 
-    /// Opening rhythm units above the anchor (baseline or cap ink). A row
+    /// Opening rhythm units above the anchor (baseline or ink top). A row
     /// count, not a length — [`opening`](Self::opening) is the pixel spacing
     /// it produces.
     #[inline]
@@ -382,17 +383,11 @@ impl RhythmBlockMetrics {
         self.top
     }
 
-    /// Closing rhythm units below the last baseline, or the paired cap close.
+    /// Closing rhythm units below the last baseline, or the paired ink close.
     /// A row count, not a length; see [`closing`](Self::closing).
     #[inline]
     pub const fn bottom_rhythms(&self) -> i32 {
         self.bottom
-    }
-
-    /// Whether the block uses cap-ink anchors instead of baseline anchors.
-    #[inline]
-    pub const fn is_cap_anchored(&self) -> bool {
-        self.cap_height.is_some()
     }
 
     fn grid(&self) -> Rhythm {
@@ -404,24 +399,26 @@ impl RhythmBlockMetrics {
     #[inline]
     pub fn opening(&self) -> f32 {
         let above = self.line.baseline_above();
-        match self.cap_height {
+        match self.ink_ascent {
             None => self.grid().height(self.top) - above,
-            Some(cap) => self.grid().height(self.top) - (above - cap),
+            Some(ink_ascent) => self.grid().height(self.top) - (above - ink_ascent),
         }
     }
 
     /// Space from the last line box down to the block's whole-row bottom edge.
     #[inline]
     pub fn closing(&self) -> f32 {
-        match self.cap_height {
+        match self.ink_ascent {
             None => self.grid().height(self.bottom) - self.line.baseline_below(),
-            Some(cap) => self.grid().height(self.bottom) + (self.line.baseline_above() - cap),
+            Some(ink_ascent) => {
+                self.grid().height(self.bottom) + (self.line.baseline_above() - ink_ascent)
+            }
         }
     }
 
     /// Distance from the block's top edge down to the first baseline: `top`
-    /// whole rhythm units for baseline anchors, plus the cap height for cap
-    /// anchors. Applies to first and single fragments; in a middle/last
+    /// whole rhythm units for baseline anchors, plus the ink ascent for
+    /// ink anchors. Applies to first and single fragments; in a middle/last
     /// fragment the first baseline sits
     /// [`RhythmLineMetrics::baseline_above`] below the fragment top.
     #[inline]
@@ -473,7 +470,7 @@ impl RhythmBlockMetrics {
     /// The whole number of rhythm rows a single-fragment block of `lines`
     /// visual lines covers, as exact integer arithmetic:
     /// `top + bottom + (lines − 1) × line_rhythms` for baseline anchors, or
-    /// `top + bottom + lines × line_rhythms` for cap anchors. The block's
+    /// `top + bottom + lines × line_rhythms` for ink anchors. The block's
     /// height in pixels is `grid.height(rows(lines))`.
     ///
     /// # Panics
@@ -542,7 +539,7 @@ impl RhythmBlockMetrics {
     }
 
     /// The baseline at an accumulated `i64` grid-row cursor. Baseline-anchored
-    /// blocks land on `row × grid size`; cap-anchored blocks retain their cap
+    /// blocks land on `row × grid size`; ink-anchored blocks retain their ink
     /// phase.
     ///
     /// Keep the cursor as exact integer rows and rebase it near the viewport
@@ -554,13 +551,13 @@ impl RhythmBlockMetrics {
     /// fragment's line-box top without accumulating preceding `f32` heights.
     #[inline]
     pub fn baseline_at_row(&self, row: i64) -> f32 {
-        self.grid().size() * row as f32 + self.cap_height.unwrap_or(0.0)
+        self.grid().size() * row as f32 + self.ink_ascent.unwrap_or(0.0)
     }
 
     /// Row-cursor delta from the first baseline of a *last* fragment of
     /// `lines` visual lines to the block's whole-row bottom edge: `lines − 1`
     /// line advances plus the closing for baseline anchors, or `lines`
-    /// advances plus the paired cap close for cap anchors. See
+    /// advances plus the paired ink close for ink anchors. See
     /// [`first_rows`](Self::first_rows) for the full contract.
     ///
     /// # Panics
@@ -573,7 +570,7 @@ impl RhythmBlockMetrics {
 
     #[inline]
     fn trailing_rows(&self) -> i128 {
-        if self.cap_height.is_some() {
+        if self.ink_ascent.is_some() {
             0
         } else {
             i128::from(self.line.line_rhythms())
@@ -719,20 +716,19 @@ mod tests {
         let font = georgia_font();
         assert!((block.first_baseline() - GRID.height(3)).abs() < 1e-6);
         let first_origin = line.paint_origin_for(block.first_baseline());
-        assert!((first_origin - GRID.baseline_top(&font, 3)).abs() < 1e-6);
+        assert!((first_origin - font.baseline_top(GRID, 3)).abs() < 1e-6);
         let closing = GRID.height(block.rows(1)) - (first_origin + line.line_height());
-        assert!((closing - GRID.baseline_bottom(&font, 1)).abs() < 1e-6);
+        assert!((closing - font.baseline_bottom(GRID, 1)).abs() < 1e-6);
     }
 
     #[test]
     fn cap_anchors_match_the_style_level_spacing() {
         let font = georgia_font();
         let cap_height = font.cap_height().unwrap();
-        let block = RhythmBlockMetrics::cap(georgia_line(), cap_height, 3, 0);
-        assert!((block.opening() - GRID.cap_top(&font, 3).unwrap()).abs() < 1e-6);
-        assert!((block.closing() - GRID.cap_bottom(&font, 0).unwrap()).abs() < 1e-6);
+        let block = RhythmBlockMetrics::ink_anchored(georgia_line(), cap_height, 3, 0);
+        assert!((block.opening() - font.cap_top(GRID, 3).unwrap()).abs() < 1e-6);
+        assert!((block.closing() - font.cap_bottom(GRID, 0).unwrap()).abs() < 1e-6);
         assert!((block.first_baseline() - (GRID.height(3) + cap_height)).abs() < 1e-6);
-        assert!(block.is_cap_anchored());
     }
 
     #[test]
@@ -743,10 +739,10 @@ mod tests {
             assert!((block.height(lines) - GRID.height(block.rows(lines))).abs() < 1e-3);
         }
 
-        let cap = RhythmBlockMetrics::cap(georgia_line(), 11.09, 3, 0);
+        let ink_block = RhythmBlockMetrics::ink_anchored(georgia_line(), 11.09, 3, 0);
         for lines in [1, 2, 5] {
-            assert_eq!(cap.rows(lines), 3 + lines as i32 * 3);
-            assert!((cap.height(lines) - GRID.height(cap.rows(lines))).abs() < 1e-3);
+            assert_eq!(ink_block.rows(lines), 3 + lines as i32 * 3);
+            assert!((ink_block.height(lines) - GRID.height(ink_block.rows(lines))).abs() < 1e-3);
         }
     }
 
@@ -754,7 +750,7 @@ mod tests {
     fn fragment_heights_sum_to_the_whole_block() {
         for block in [
             RhythmBlockMetrics::new(georgia_line(), 3, 1),
-            RhythmBlockMetrics::cap(georgia_line(), 11.09, 3, 0),
+            RhythmBlockMetrics::ink_anchored(georgia_line(), 11.09, 3, 0),
         ] {
             let split = block.first_height(2) + block.middle_height(4) + block.last_height(3);
             assert!((split - block.height(9)).abs() < 1e-3);
@@ -770,11 +766,19 @@ mod tests {
 
     #[test]
     fn fragment_rows_partition_the_block_exactly() {
-        for block in [
-            RhythmBlockMetrics::new(georgia_line(), 3, 1),
-            RhythmBlockMetrics::cap(georgia_line(), 11.09, 3, 0),
-            RhythmBlockMetrics::new(georgia_line(), -2, 1),
-            RhythmBlockMetrics::cap(georgia_line(), 11.09, -2, -1),
+        // An ink anchor closes on the last line's ink top, a baseline anchor a
+        // whole line lower, so the trailing rows differ by one line box.
+        for (block, ink_anchored) in [
+            (RhythmBlockMetrics::new(georgia_line(), 3, 1), false),
+            (
+                RhythmBlockMetrics::ink_anchored(georgia_line(), 11.09, 3, 0),
+                true,
+            ),
+            (RhythmBlockMetrics::new(georgia_line(), -2, 1), false),
+            (
+                RhythmBlockMetrics::ink_anchored(georgia_line(), 11.09, -2, -1),
+                true,
+            ),
         ] {
             let line_rhythms = block.line().line_rhythms() as i32;
             assert_eq!(
@@ -784,11 +788,7 @@ mod tests {
             assert_eq!(block.first_rows(1) + block.last_rows(1), block.rows(2));
             assert_eq!(block.first_rows(5), block.top_rhythms() + 5 * line_rhythms);
             assert_eq!(block.middle_rows(4), 4 * line_rhythms);
-            let trailing = if block.is_cap_anchored() {
-                0
-            } else {
-                line_rhythms
-            };
+            let trailing = if ink_anchored { 0 } else { line_rhythms };
             assert_eq!(
                 block.last_rows(3),
                 3 * line_rhythms + block.bottom_rhythms() - trailing
@@ -800,9 +800,9 @@ mod tests {
     fn fragment_row_cursor_reconstructs_every_continuation_origin() {
         for block in [
             RhythmBlockMetrics::new(georgia_line(), 3, 1),
-            RhythmBlockMetrics::cap(georgia_line(), 11.09, 3, 0),
+            RhythmBlockMetrics::ink_anchored(georgia_line(), 11.09, 3, 0),
             RhythmBlockMetrics::new(georgia_line(), -2, 1),
-            RhythmBlockMetrics::cap(georgia_line(), 11.09, -2, -1),
+            RhythmBlockMetrics::ink_anchored(georgia_line(), 11.09, -2, -1),
         ] {
             let line = block.line();
             // Split 2 / 4 / 1 / 3 / 2: each continuation fragment's line-box
@@ -842,7 +842,7 @@ mod tests {
     #[test]
     fn virtualizer_rebases_a_wide_multi_block_cursor_before_float_conversion() {
         let preceding = RhythmBlockMetrics::new(georgia_line(), 3, 1);
-        let visible = RhythmBlockMetrics::cap(georgia_line(), 11.09, 3, 0);
+        let visible = RhythmBlockMetrics::ink_anchored(georgia_line(), 11.09, 3, 0);
 
         let mut document_cursor = i64::from(i32::MAX) * 4;
         document_cursor = document_cursor
@@ -879,12 +879,12 @@ mod tests {
     }
 
     #[test]
-    fn baseline_at_row_preserves_cap_phase() {
-        let cap = RhythmBlockMetrics::cap(georgia_line(), 11.09, 3, 0);
-        let row = cap.first_rows(2);
-        let expected = cap.first_baseline() + 2.0 * cap.line().line_height();
-        assert!((cap.baseline_at_row(i64::from(row)) - expected).abs() < 1e-5);
-        assert!((cap.baseline_at_row(0) - 11.09).abs() < 1e-6);
+    fn baseline_at_row_preserves_ink_phase() {
+        let ink_block = RhythmBlockMetrics::ink_anchored(georgia_line(), 11.09, 3, 0);
+        let row = ink_block.first_rows(2);
+        let expected = ink_block.first_baseline() + 2.0 * ink_block.line().line_height();
+        assert!((ink_block.baseline_at_row(i64::from(row)) - expected).abs() < 1e-5);
+        assert!((ink_block.baseline_at_row(0) - 11.09).abs() < 1e-6);
     }
 
     #[test]
@@ -955,8 +955,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "cap height must be finite and greater than zero")]
-    fn cap_blocks_reject_an_unusable_cap_height() {
-        let _ = RhythmBlockMetrics::cap(georgia_line(), 0.0, 3, 0);
+    #[should_panic(expected = "ink anchor ascent must be finite and greater than zero")]
+    fn ink_anchored_blocks_reject_an_unusable_ascent() {
+        let _ = RhythmBlockMetrics::ink_anchored(georgia_line(), 0.0, 3, 0);
     }
 }
