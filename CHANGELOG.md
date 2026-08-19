@@ -53,7 +53,10 @@ cap, x)`.
   classic translucent red (`0xff78783f`); the new `grid.overlay(color)`
   factory — optionally with `.phase(offset)` — customizes the stripes through
   the same chainable toggle. `rhythm_overlay(grid, color)` remains the
-  explicit form.
+  explicit form. `RhythmOverlay::paint(bounds, window)` exposes the identical
+  clipping and visible-stripe walk to custom elements whose content translation
+  only settles during prepaint; the application supplies the final phase at
+  paint time and the crate stores no callback or scroll state.
 
 CJK ink anchors — horizontal CJK already shared Latin's baseline, so
 `baseline_top` and friends needed no change and none was made. One thing

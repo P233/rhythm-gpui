@@ -170,7 +170,11 @@ The example is a recipe collection:
   the grid color, and `.phase(content_offset_y)` on the overlay accepts the
   same signed Y translation used to paint content for renderers that scroll
   without moving a scroll container. A gpui `ScrollHandle`'s negative
-  `offset().y` can be passed through directly.
+  `offset().y` can be passed through directly. If that translation is not final
+  until prepaint, configure a temporary overlay with the settled value and call
+  `RhythmOverlay::paint(bounds, window)` during the custom element's paint
+  stage; element rendering and direct painting share the same clipping and
+  visible-stripe walk.
 - **Device-pixel snapping** — the functions are exact to float precision
   (no whole-pixel rounding, unlike the Sass version); use `snap` to round a
   final value to whole device pixels. gpui's `Window::line_height()` helper

@@ -1069,7 +1069,9 @@ pub fn rhythm_overlay(grid: RhythmGrid, color: impl Into<Hsla>) -> RhythmOverlay
 /// mask) are painted, and each is clipped to the overlay's own bounds, so
 /// covering a document far taller than the viewport costs
 /// `O(viewport height / grid size)` per frame and never paints outside the
-/// container it covers.
+/// container it covers. Custom elements whose offset settles during prepaint
+/// can call [`paint`](Self::paint) with a freshly phased value during their
+/// paint stage instead of capturing stale state during render.
 #[derive(IntoElement)]
 pub struct RhythmOverlay {
     grid: RhythmGrid,
@@ -1100,6 +1102,63 @@ impl RhythmOverlay {
         self.phase = offset;
         self
     }
+
+    /// Paint the configured stripes directly into `window` within `bounds`.
+    ///
+    /// This is the paint-stage counterpart to using the overlay as an element.
+    /// It is intended for custom renderers whose signed content translation is
+    /// not final until another element's prepaint has settled layout. Read that
+    /// application-owned value during paint, apply it to a temporary overlay
+    /// with [`phase`](Self::phase), then call this method; the crate stores no
+    /// callback or mutable scroll state.
+    ///
+    /// `bounds` takes the covered container's role, which the element form
+    /// fills in from the parent: stripe row 0 starts at `bounds.origin.y` plus
+    /// the [`phase`](Self::phase), and nothing paints outside the box. The
+    /// current content mask is applied exactly as for the element form, and
+    /// only visible stripes are visited. Call this after painting the content
+    /// the stripes should cover.
+    ///
+    /// ```no_run
+    /// use gpui::{Bounds, Pixels, Window, px, rgba};
+    /// use rhythm_gpui::RhythmGrid;
+    ///
+    /// fn paint_grid(
+    ///     bounds: Bounds<Pixels>,
+    ///     content_offset_y: Pixels,
+    ///     window: &mut Window,
+    /// ) {
+    ///     RhythmGrid::new(px(8.))
+    ///         .overlay(rgba(0xff78783f))
+    ///         .phase(content_offset_y)
+    ///         .paint(bounds, window);
+    /// }
+    /// ```
+    pub fn paint(&self, bounds: Bounds<Pixels>, window: &mut Window) {
+        let visible = bounds.intersect(&window.content_mask().bounds);
+        if visible.size.height <= px(0.) || visible.size.width <= px(0.) {
+            return;
+        }
+
+        // Apply the same signed translation as the painted content so the grid
+        // origin stays attached to the document.
+        let origin_y = overlay_origin_y(bounds.origin.y, self.phase);
+        visible_stripes(
+            origin_y,
+            f32::from(self.grid.size()),
+            f32::from(visible.origin.y),
+            f32::from(visible.bottom()),
+            |from, to| {
+                window.paint_quad(fill(
+                    Bounds::new(
+                        point(bounds.origin.x, px(from)),
+                        size(bounds.size.width, px(to - from)),
+                    ),
+                    self.color,
+                ));
+            },
+        );
+    }
 }
 
 #[inline]
@@ -1118,33 +1177,9 @@ impl From<RhythmGrid> for RhythmOverlay {
 
 impl RenderOnce for RhythmOverlay {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let Self { grid, color, phase } = self;
         canvas(
             |_, _, _| (),
-            move |bounds, _, window, _| {
-                let visible = bounds.intersect(&window.content_mask().bounds);
-                if visible.size.height <= px(0.) || visible.size.width <= px(0.) {
-                    return;
-                }
-                // Apply the same signed translation as the painted content so
-                // the grid origin stays attached to the document.
-                let origin_y = overlay_origin_y(bounds.origin.y, phase);
-                visible_stripes(
-                    origin_y,
-                    f32::from(grid.size()),
-                    f32::from(visible.origin.y),
-                    f32::from(visible.bottom()),
-                    |from, to| {
-                        window.paint_quad(fill(
-                            Bounds::new(
-                                point(bounds.origin.x, px(from)),
-                                size(bounds.size.width, px(to - from)),
-                            ),
-                            color,
-                        ));
-                    },
-                );
-            },
+            move |bounds, _, window, _| self.paint(bounds, window),
         )
         .absolute()
         .inset_0()
