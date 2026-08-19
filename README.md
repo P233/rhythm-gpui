@@ -38,11 +38,6 @@ which is why looking it up per font is no longer necessary.
 
 ## Installation
 
-> **Pre-release:** `main` currently documents the unreleased `0.2.0` API. The
-> latest published crate and [docs.rs API](https://docs.rs/rhythm-gpui/0.1.0/rhythm_gpui/)
-> are still `0.1.0`; the dependency below will resolve after `0.2.0` is
-> published.
-
 ```toml
 [dependencies]
 rhythm-gpui = "0.2"
@@ -52,9 +47,9 @@ The crate has two layers behind one package:
 
 - **`gpui` feature** (default) — the gpui integration: metric resolution through
   `TextSystem` (with `RhythmFontSpec` cache keys and the resolved `FontId`),
-  `Pixels`-typed spacing, drop caps, the fluid-width `RhythmFrame` (with its
-  `RhythmFit` pad/crop mode), the `RhythmStyled` extension, and the
-  configurable `RhythmOverlay` debug grid.
+  `Pixels`-typed spacing, drop caps, the measured `RhythmIcfAnchor` for CJK ink,
+  the fluid-width `RhythmFrame` (with its `RhythmFit` pad/crop mode), the
+  `RhythmStyled` extension, and the configurable `RhythmOverlay` debug grid.
 - **`default-features = false`** — only the dependency-free rhythm math
   (`Rhythm`, `FontRhythm`, `RhythmLineMetrics`, `RhythmBlockMetrics`,
   `DropCapRhythm`, `snap`, and height snapping). Any renderer that centers
@@ -241,23 +236,29 @@ of what 字 reaches. Measuring beats reading the font's `BASE` table: SimSong
 ships none at all, and Apple SD Gothic Neo's hangul overshoots its declared
 `icft` by 0.054 em.
 
-Measurement returns a `RhythmIcfAnchor` bound to the exact resolved font, size,
-and grid it measured. The base `RhythmFont` remains entirely determined by its
+`measure_icf` returns `Result<RhythmIcfAnchor, IcfMeasurementError>`, and a
+successful anchor is bound to the exact resolved font, size, and grid it
+measured. The base `RhythmFont` remains entirely determined by its
 `RhythmFontSpec`, so cache it normally; cache an anchor separately only when
-useful, keyed by both the spec and probes. Failure occurs once at
-`measure_icf`; a successful anchor's `span` and `trim_top` are infallible pure
-geometry.
+useful, keyed by both the spec and probes. Failure occurs once, here; an
+anchor's `span` and `trim_top` are infallible pure geometry.
 
-The error variants preserve what gpui made observable. Empty input returns
-`EmptyProbes`; when every probe-bound query fails, measurement returns
-`NoProbeBounds`; when at least one query returns bounds but every bound is
-rejected, it returns `NoUsableBounds`. If failed queries and rejected bounds
-are mixed, `NoUsableBounds` wins. In gpui 0.2.2, CoreText and Linux report a
-missing glyph as absent, while Linux returns advance-only placeholder bounds
-for covered glyphs, so its unsupported ink measurement takes the latter path.
-DirectWrite instead substitutes `.notdef` for a missing glyph, whose box can
-pass for ink; probe with glyphs the resolved face actually covers. Always use
-the same `TextSystem` for measurement that resolved the `RhythmFont`.
+Availability follows gpui's text backend. In gpui 0.2.2, CoreText and
+DirectWrite expose glyph ink bounds, while the Linux backend returns
+advance-only placeholder bounds, so measurement there always fails — take the
+`ink_anchored` path below instead.
+
+`IcfMeasurementError` is `#[non_exhaustive]`, and its variants report what gpui
+made observable rather than a guessed platform cause. A font synthesized
+without a `TextSystem` has no resolved `FontId` and returns `UnresolvedFont`.
+Empty input returns `EmptyProbes`; when every probe-bound query fails,
+measurement returns `NoProbeBounds`; when at least one query returns bounds but
+every bound is rejected — the Linux placeholder path — it returns
+`NoUsableBounds`. If failed queries and rejected bounds are mixed,
+`NoUsableBounds` wins. Probe with glyphs the resolved face actually covers:
+CoreText and Linux report a missing glyph as absent, while DirectWrite
+substitutes `.notdef`, whose box can pass for ink. Always use the same
+`TextSystem` for measurement that resolved the `RhythmFont`.
 
 When a renderer already has a trusted character-face ascent, or its backend
 cannot measure one, call `RhythmBlockMetrics::ink_anchored` directly. Passing

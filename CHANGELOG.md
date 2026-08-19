@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-08-19)
 
 API reshaped along the ownership chain: a `RhythmFont` already carries its
 grid, so spacing now comes from the font itself and the grid acts as the
@@ -64,29 +64,31 @@ baseline anchoring cannot do is land ideographic _ink_ on a grid line, and
 that is the whole of this addition:
 
 - `RhythmFont::measure_icf(text_system, probes)` measures the character face
-  from the resolved face through `typographic_bounds` and returns a
-  `RhythmIcfAnchor` bound to that exact font, size, and grid. Its infallible
-  `span(top, bottom)` returns the paired opening that lands ideographic ink on
-  a grid line and still spans whole rhythm rows; `trim_top()` reports the
-  invisible band between the line box and that ink. `RhythmFont` itself remains
-  entirely determined by `RhythmFontSpec`, so ordinary resolved-font caches
-  carry no hidden measured/unmeasured state. The math layer needs nothing new:
+  from the resolved face through `typographic_bounds` and returns
+  `Result<RhythmIcfAnchor, IcfMeasurementError>`, the anchor bound to that
+  exact font, size, and grid. Its infallible `span(top, bottom)` returns the
+  paired opening that lands ideographic ink on a grid line and still spans
+  whole rhythm rows; `trim_top()` reports the invisible band between the line
+  box and that ink. `RhythmFont` itself remains entirely determined by
+  `RhythmFontSpec`, so ordinary resolved-font caches carry no hidden
+  measured/unmeasured state. The math layer needs nothing new:
   `RhythmBlockMetrics::ink_anchored` takes an anchored ink ascent — a Latin cap
   height or a CJK character-face ascent — and yields the same opening and
-  closing, plus row and fragment geometry.
-  Measuring beats reading the font's `BASE` table: SimSong ships none, and
-  Apple SD Gothic Neo's hangul overshoots its declared `icft` by 0.054 em,
-  while PingFang SC and Toppan Bunkyu Gothic agree within 0.003 em. Pass a
+  closing, plus row and fragment geometry. Measuring beats reading the font's
+  `BASE` table: SimSong ships none, and Apple SD Gothic Neo's hangul overshoots
+  its declared `icft` by 0.054 em, while PingFang SC and Toppan Bunkyu Gothic
+  agree within 0.003 em. Pass a
   _set_ of full-frame glyphs — 国 alone stops 0.05 em short of 字 — and include
   kana for Japanese, whose dakuten ride above the han envelope as Latin
   ascenders ride above cap height. The measurement remains optional: gpui
   0.2.2 exposes glyph ink bounds on CoreText and DirectWrite, while its Linux
-  backend does not yet implement them. Measurement preserves the public
-  distinction instead of discarding it: empty input returns `EmptyProbes`, all
-  failed bounds queries return `NoProbeBounds`, and returned-but-rejected bounds
-  return `NoUsableBounds` (the Linux path). DirectWrite can still substitute a
-  missing glyph with `.notdef`, so callers must choose probes covered by the
-  resolved face.
+  backend does not yet implement them. The exported `#[non_exhaustive]`
+  `IcfMeasurementError` preserves the public distinction instead of discarding
+  it: a font synthesized without a `TextSystem` returns `UnresolvedFont`, empty
+  input returns `EmptyProbes`, all failed bounds queries return
+  `NoProbeBounds`, and returned-but-rejected bounds return `NoUsableBounds`
+  (the Linux path). DirectWrite can still substitute a missing glyph with
+  `.notdef`, so callers must choose probes covered by the resolved face.
 - Cap-anchor docs now warn that a CJK face's reported cap and x heights may
   describe no glyph at all: PingFang's `sCapHeight` 0.860 em is a copy of its
   `sTypoAscender` while its `H` reaches 0.714 em.
