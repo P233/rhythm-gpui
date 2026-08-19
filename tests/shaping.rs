@@ -221,11 +221,12 @@ mod suite {
         );
     }
 
-    /// Group 3: glyphs substituted by font fallback borrow the primary
-    /// font's baseline and never enter the line's ascent/descent — the line
-    /// box of a single explicit run stays the primary font's, whatever
-    /// scripts the text contains.
-    fn glyph_fallback(window: &Window) {
+    /// Group 3: on CoreText, glyphs substituted by font fallback borrow the
+    /// primary font's baseline and never enter the line's ascent/descent — the
+    /// reported metrics of a single explicit run stay the primary font's,
+    /// whatever scripts the text contains. This does not inspect the fallback
+    /// glyphs' typographic or raster ink bounds.
+    fn glyph_fallback_keeps_primary_line_metrics(window: &Window) {
         let serif = font("Noto Serif");
         let line = shape(window, &[("abc 汉字 😀 def", &serif)]);
         let (ascent, descent) = font_extents(window, &serif);
@@ -233,23 +234,24 @@ mod suite {
         assert_close(line.descent().into(), descent, "fallback line descent");
     }
 
-    /// Group 4: ink taller than the chosen line box reports overflow with a
-    /// negative half-leading, `min_line_rhythms` is the smallest fitting
-    /// count, and baseline placement stays exact while overflowing.
+    /// Group 4: a reported ascent/descent envelope taller than the chosen line
+    /// box reports overflow with negative half-leading, `min_line_rhythms` is
+    /// the smallest fitting count, and baseline placement stays exact while
+    /// overflowing.
     fn overflow(window: &Window) {
         let grid = RhythmGrid::new(px(8.));
         let serif = font("Noto Serif");
         let emoji = font("Apple Color Emoji");
         let line = shape(window, &[("hi ", &serif), ("😀", &emoji)]);
-        let ink = f32::from(line.ascent()) + f32::from(line.descent());
+        let envelope = f32::from(line.ascent()) + f32::from(line.descent());
 
         let min = grid
             .line_metrics(line.ascent(), line.descent(), 1)
             .min_line_rhythms();
-        assert!(min >= 2, "16px mixed ink spans multiple 8px rows");
+        assert!(min >= 2, "16px mixed metrics span multiple 8px rows");
         assert!(
-            f32::from(grid.size()) * min as f32 + TOLERANCE >= ink,
-            "min_line_rhythms must contain the ink"
+            f32::from(grid.size()) * min as f32 + TOLERANCE >= envelope,
+            "min_line_rhythms must contain the metric envelope"
         );
 
         let small = grid.line_metrics(line.ascent(), line.descent(), min - 1);
@@ -522,7 +524,7 @@ mod suite {
                 |window, cx| {
                     single_explicit_run(window);
                     mixed_explicit_runs(window);
-                    glyph_fallback(window);
+                    glyph_fallback_keeps_primary_line_metrics(window);
                     overflow(window);
                     covering_budget(window);
                     ideographic_ink(cx);

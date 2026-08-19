@@ -22,7 +22,7 @@ use crate::Rhythm;
 ///
 /// Unlike [`FontRhythm`](crate::FontRhythm), which carries a resolved *style*
 /// (with its font size and optional cap/x heights), this is the minimal value
-/// a renderer needs to place one already-shaped line: the line's real
+/// a renderer needs to place one already-shaped line: the line's reported
 /// `ascent`/`descent`, its height in whole rhythm units, and the grid. In
 /// gpui, feed it `WrappedLine::ascent()` / `descent()` — the shaped maxima
 /// over the line's explicit font runs — and every visual line of that
@@ -30,13 +30,14 @@ use crate::Rhythm;
 /// whole-row line height.
 ///
 /// The renderer chooses `line_rhythms`; [`min_line_rhythms`](Self::min_line_rhythms)
-/// suggests the smallest count whose line box contains the ink, and
+/// suggests the smallest count whose line box contains that metric envelope, and
 /// [`overflows_line_box`](Self::overflows_line_box) reports when the chosen
 /// count is smaller. Keeping a smaller count is valid — the baseline stays on
-/// the grid and the ink overflows symmetrically via negative half-leading,
-/// exactly as CSS line boxes behave. [`covering`](Self::covering) picks the
-/// count the other way round: over a known set of faces, before anything is
-/// shaped.
+/// the grid and the reported envelope overflows symmetrically via negative
+/// half-leading, exactly as CSS line boxes behave. This does not claim that
+/// every glyph's typographic or raster ink stays inside the line box.
+/// [`covering`](Self::covering) picks the count the other way round: over a
+/// known set of faces, before anything is shaped.
 ///
 /// A shaped *empty* line has zero ascent and descent; place empty lines with
 /// the style's [`FontRhythm`](crate::FontRhythm) metrics instead so blank
@@ -94,8 +95,9 @@ impl RhythmLineMetrics {
 
     /// Like [`new`](Self::new), but grows the line box to
     /// [`min_line_rhythms`](Self::min_line_rhythms) when `line_rhythms` is too
-    /// small to contain the shaped ink. Use it when the configured line height
-    /// is a floor rather than a fixed virtualization budget.
+    /// small to contain the reported ascent/descent envelope. Use it when the
+    /// configured line height is a floor rather than a fixed virtualization
+    /// budget.
     ///
     /// # Panics
     ///
@@ -112,18 +114,19 @@ impl RhythmLineMetrics {
     /// The smallest line box on `grid` containing every line in `metrics`:
     /// the maximum ascent and the maximum descent over the set, in the
     /// largest of their line heights, grown to
-    /// [`min_line_rhythms`](Self::min_line_rhythms) when that combined ink no
-    /// longer fits.
+    /// [`min_line_rhythms`](Self::min_line_rhythms) when that combined metric
+    /// envelope no longer fits.
     ///
     /// A line shapes to the maxima over its explicit font runs, so no line
-    /// drawn from a known set of faces can exceed the box covering that set.
-    /// Folding a style's whole set — its own face, the faces its runs use
-    /// (bold, inline code, an explicit CJK or emoji face), and the families
-    /// gpui would resolve to if one were missing — at catalog-build time
-    /// makes "the line box contains the ink" a property of construction
-    /// rather than one each shaped line has to be checked for. Nothing here
-    /// shapes text: the count is known at startup, so a block's height
-    /// follows from its line count alone, which is what a virtualized
+    /// drawn from a caller-supplied set of face metrics can exceed the box
+    /// covering that set. Folding a style's whole known set — its own face and
+    /// the faces its runs explicitly use (bold, inline code, or an explicit CJK
+    /// or emoji face) — at catalog-build time makes the line's metric envelope
+    /// a property of construction rather than one each shaped line has to be
+    /// checked for. Glyph-level fallback faces selected later by a platform
+    /// shaper are outside this set unless the caller supplies their metrics.
+    /// Nothing here shapes text: the count is known at startup, so a block's
+    /// height follows from its line count alone, which is what a virtualized
     /// renderer needs.
     ///
     /// Take the count, not the box, into placement: this value's
@@ -143,7 +146,7 @@ impl RhythmLineMetrics {
     /// let display = RhythmLineMetrics::new(28.8, 6.4, 3, grid);
     ///
     /// // One static row budget for the style: three rows cannot hold the
-    /// // display face's ink, so the covering box is five.
+    /// // display face's ascent/descent envelope, so the covering box is five.
     /// let budget = RhythmLineMetrics::covering(&[body, display], grid);
     /// assert_eq!(budget.line_rhythms(), 5);
     ///
@@ -177,13 +180,13 @@ impl RhythmLineMetrics {
         Self::at_least(ascent, descent, line_rhythms, grid)
     }
 
-    /// The shaped ascent above the baseline, non-negative.
+    /// The reported shaped ascent above the baseline, non-negative.
     #[inline]
     pub const fn ascent(&self) -> f32 {
         self.ascent
     }
 
-    /// The shaped descent below the baseline, non-negative.
+    /// The reported shaped descent below the baseline, non-negative.
     #[inline]
     pub const fn descent(&self) -> f32 {
         self.descent
@@ -208,7 +211,7 @@ impl RhythmLineMetrics {
     }
 
     /// Extra space split above and below the `ascent + descent` box; negative
-    /// when the ink is taller than the line box.
+    /// when that metric envelope is taller than the line box.
     #[inline]
     pub fn half_leading(&self) -> f32 {
         (self.line_height() - self.ascent - self.descent) / 2.0
@@ -236,11 +239,11 @@ impl RhythmLineMetrics {
         target_baseline - self.baseline_above()
     }
 
-    /// The smallest `line_rhythms` whose line box contains the shaped ink, at
-    /// least 1. Applies the same snapping rule as [`Rhythm::snap_up`] — at
-    /// `f64` precision, since shaped metrics are summed rather than measured —
-    /// so ink within a few rounding steps of a whole-row height does not claim
-    /// an extra row.
+    /// The smallest `line_rhythms` whose line box contains the reported
+    /// `ascent + descent` envelope, at least 1. Applies the same snapping rule
+    /// as [`Rhythm::snap_up`] — at `f64` precision, since shaped metrics are
+    /// summed rather than measured — so an envelope within a few rounding
+    /// steps of a whole-row height does not claim an extra row.
     ///
     /// Advisory: the renderer decides whether to grow the line or keep its
     /// chosen height and accept the overflow.
@@ -258,9 +261,10 @@ impl RhythmLineMetrics {
         rows as u32
     }
 
-    /// Whether the shaped ink is taller than the chosen line box —
-    /// equivalently, whether [`half_leading`](Self::half_leading) is negative
-    /// beyond [`Rhythm::snap_up`]'s tolerance.
+    /// Whether the reported `ascent + descent` envelope is taller than the
+    /// chosen line box — equivalently, whether
+    /// [`half_leading`](Self::half_leading) is negative beyond
+    /// [`Rhythm::snap_up`]'s tolerance.
     #[inline]
     pub fn overflows_line_box(&self) -> bool {
         self.minimum_line_rows() > f64::from(self.line_rhythms)
@@ -272,13 +276,13 @@ impl RhythmLineMetrics {
     // is deliberate — see the note there before merging them.
     #[inline]
     fn minimum_line_rows(&self) -> f64 {
-        let ink = f64::from(self.ascent) + f64::from(self.descent);
+        let envelope = f64::from(self.ascent) + f64::from(self.descent);
         let grid_size = f64::from(self.grid.size());
-        let rows = ink / grid_size;
+        let rows = envelope / grid_size;
         let nearest = rows.round();
         let nearest_height = grid_size * nearest;
-        let tolerance = ink * f64::from(f32::EPSILON) * 8.0;
-        let snapped = if (ink - nearest_height).abs() <= tolerance {
+        let tolerance = envelope * f64::from(f32::EPSILON) * 8.0;
+        let snapped = if (envelope - nearest_height).abs() <= tolerance {
             nearest
         } else {
             rows.ceil()
@@ -625,8 +629,8 @@ mod tests {
     }
 
     #[test]
-    fn min_line_rhythms_covers_the_ink() {
-        // Georgia 16px ink is ~18.2px: three 8px rows minimum.
+    fn min_line_rhythms_covers_the_metric_envelope() {
+        // Georgia's 16px ascent/descent envelope is ~18.2px: three 8px rows minimum.
         let line = georgia_line();
         assert_eq!(line.min_line_rhythms(), 3);
         assert!(!line.overflows_line_box());
@@ -639,7 +643,7 @@ mod tests {
         let grown = RhythmLineMetrics::new(20.0, 6.0, 4, GRID);
         assert!(!grown.overflows_line_box());
 
-        // Exactly filling ink is not an overflow, and float error within
+        // Exactly filling the envelope is not an overflow, and float error within
         // snap_up's tolerance does not claim an extra row.
         let exact = RhythmLineMetrics::new(20.0, 4.0, 3, GRID);
         assert_eq!(exact.min_line_rhythms(), 3);
@@ -671,7 +675,7 @@ mod tests {
     }
 
     #[test]
-    fn overflow_is_reported_when_no_u32_line_count_can_fit_the_ink() {
+    fn overflow_is_reported_when_no_u32_line_count_can_fit_the_metric_envelope() {
         let tiny_grid = Rhythm::new(f32::MIN_POSITIVE);
         let line = RhythmLineMetrics::new(1.0, 0.0, u32::MAX, tiny_grid);
         assert!(line.overflows_line_box());
@@ -900,7 +904,7 @@ mod tests {
         // mixing the display ascent with the monospace descent.
         assert_eq!(covering.ascent(), 28.8);
         assert_eq!(covering.descent(), 6.0);
-        assert_eq!(covering.line_rhythms(), 5); // 34.8px of ink needs 5 rows
+        assert_eq!(covering.line_rhythms(), 5); // A 34.8px envelope needs 5 rows.
         assert!(!covering.overflows_line_box());
 
         // The point of the fold: at that count no mixture overflows, so the
@@ -915,8 +919,8 @@ mod tests {
 
     #[test]
     fn covering_keeps_the_tallest_requested_line_height() {
-        // Ink that fits everywhere: the count comes from the members, not
-        // from the ink, and a single-member fold is the member itself.
+        // Metrics that fit everywhere: the count comes from the members, not
+        // from their envelope, and a single-member fold is the member itself.
         let short = RhythmLineMetrics::new(14.67, 3.51, 3, GRID);
         let tall = RhythmLineMetrics::new(10.0, 3.0, 5, GRID);
         assert_eq!(

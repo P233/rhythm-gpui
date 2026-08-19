@@ -146,7 +146,8 @@ impl RhythmGrid {
     }
 
     /// [`line_metrics`](Self::line_metrics) with `line_rhythms` as a floor:
-    /// grow the line box when the shaped ink needs more rows.
+    /// grow the line box when the reported ascent/descent envelope needs more
+    /// rows.
     pub fn line_metrics_at_least(
         &self,
         ascent: Pixels,
@@ -369,8 +370,11 @@ impl RhythmFont {
     /// runs; shape it and place the result through
     /// [`RhythmLineMetrics`](crate::RhythmLineMetrics) so that shared
     /// baseline still lands on the grid. Glyph-level fallback is different:
-    /// substituted glyphs borrow the primary font's baseline and never enter
-    /// the line's ascent, so fallback text needs no special handling.
+    /// on the validated macOS/CoreText backend, substituted glyphs borrow the
+    /// primary font's baseline and do not enlarge the shaped line's
+    /// `ascent`/`descent`. That is a line-metrics contract, not proof that every
+    /// fallback glyph's typographic or raster ink stays inside the primary line
+    /// box; other gpui text backends need their own native validation.
     ///
     /// # Panics
     ///
@@ -791,26 +795,31 @@ impl RhythmFontSpec {
         )
     }
 
-    /// Resolve this spec at a line height that also contains every font in
-    /// `others` — the catalog-build step that makes "the line box holds the
-    /// ink" true by construction rather than per shaped line.
+    /// Resolve this spec at a line height covering the ascent/descent envelope
+    /// of every font in `others` — the catalog-build step that fixes one row
+    /// budget over an explicit face set rather than per shaped line.
     ///
     /// A line shapes to the maxima over its explicit font runs, so a style
-    /// needs a line height covering the tallest mixture of every face its
-    /// lines can draw on: the run faces (bold, inline code, an explicit CJK
-    /// or emoji face) and the families gpui would resolve to if one were
-    /// missing. gpui shapes all `TextRun`s in a line at one font size, so
-    /// every spec must use this spec's `font_size` and grid. Compatibility is
-    /// checked before any font is resolved, then the resolved metrics are
-    /// folded with [`RhythmLineMetrics::covering`]. The result is *this*
-    /// spec's font at the covering count — metrics, cap height, and baselines
-    /// stay the primary face's, only the line height grows. Nothing is shaped,
-    /// so the count is a startup constant and every block's height follows
-    /// from its line count, which is what a virtualized renderer needs.
+    /// needs a line height covering the tallest mixture of every face the
+    /// caller knows its runs can explicitly select: bold, inline code, or an
+    /// explicit CJK or emoji face. `others` is that closed, caller-supplied
+    /// catalog. Each listed [`Font`] is resolved through gpui — including the
+    /// family fallback gpui chooses when that request is missing — but this
+    /// method neither inspects text nor discovers glyph-level fallback faces
+    /// selected later by the platform shaper.
+    ///
+    /// gpui shapes all `TextRun`s in a line at one font size, so every spec must
+    /// use this spec's `font_size` and grid. Compatibility is checked before any
+    /// font is resolved, then the resolved metrics are folded with
+    /// [`RhythmLineMetrics::covering`]. The result is *this* spec's font at the
+    /// covering count — metrics, cap height, and baselines stay the primary
+    /// face's, only the line height grows. Nothing is shaped, so the count is a
+    /// startup constant and every block's height follows from its line count,
+    /// which is what a virtualized renderer needs.
     ///
     /// Keep placing each shaped line with its own `ascent`/`descent` at this
     /// font's [`line_rhythms`](FontRhythm::line_rhythms); with the height
-    /// settled here, no shaped mixture of the covered set outgrows it.
+    /// settled here, no explicit-run mixture of the covered set outgrows it.
     /// Resolve the run faces at that same count when their own metrics
     /// are used for placement — [`spec`](RhythmFont::spec) on the returned
     /// font carries it, and reproduces these metrics as usual.
@@ -1694,8 +1703,8 @@ mod tests {
         let display = grid.line_metrics(px(28.8), px(6.4), 3);
         let covering = grid.line_metrics_covering(&[body, display]);
 
-        // Three rows cannot hold the display face's ink; five can, and every
-        // mixture of the pair fits that count.
+        // Three rows cannot hold the display face's metric envelope; five can,
+        // and every mixture of the pair fits that count.
         assert_eq!(covering.line_rhythms(), 5);
         assert!(!grid
             .line_metrics(px(28.8), px(6.4), covering.line_rhythms())

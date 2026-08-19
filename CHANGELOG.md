@@ -137,12 +137,13 @@ A new value-only layer makes that the supported path for custom document
 renderers, and retires the old "lay each font out as its own element"
 advice:
 
-- `RhythmLineMetrics`: placement from a shaped line's real
+- `RhythmLineMetrics`: placement from a shaped line's reported
   `ascent()`/`descent()` — `line_height`, `baseline_above`/`baseline_below`,
   `half_leading`, `paint_origin_for(target_baseline)`, and the advisory
-  `min_line_rhythms` / `overflows_line_box` pair for ink taller than the
-  chosen line box. Factories: `RhythmGrid::line_metrics(ascent, descent, n)`,
-  `RhythmFont::line_metrics()`, `FontRhythm::line_metrics(grid)`.
+  `min_line_rhythms` / `overflows_line_box` pair for a metric envelope taller
+  than the chosen line box. Factories:
+  `RhythmGrid::line_metrics(ascent, descent, n)`, `RhythmFont::line_metrics()`,
+  `FontRhythm::line_metrics(grid)`.
 - `RhythmBlockMetrics`: whole-row block geometry over one line's metrics —
   baseline anchors (`new`) or ink-top anchors (`ink_anchored`), opening/closing and
   first/middle/last fragment heights, `first_baseline`, the
@@ -160,14 +161,15 @@ advice:
   virtualization budget.
 - `RhythmLineMetrics::covering` (with `RhythmGrid::line_metrics_covering` and
   `RhythmFontSpec::resolve_covering` as typed and resolution-time entries): fix
-  a style's line height over the
-  whole same-size, same-grid set of faces its lines can draw on — its own, its
-  run faces, and the families gpui would resolve to if one were missing —
-  instead of per shaped line. Since a line shapes to the maxima over its runs,
-  no mixture of a covered set can overflow the covering box, so "the line box
-  contains the ink" becomes a property of construction. Nothing is shaped to
-  compute it: the row budget is a startup constant, which is what lets a
-  virtualized renderer derive a block's height from its line count alone.
+  a style's line height over the whole same-size, same-grid set of explicit
+  faces the caller supplies — its own and its known run faces — instead of per
+  shaped line. Since a line shapes to the maxima over its explicit runs, no
+  mixture of that covered set can exceed its metric envelope. Each listed font
+  still follows gpui's family-resolution fallback, but these APIs neither
+  inspect text nor discover glyph-level fallback faces selected later by the
+  platform shaper. Nothing is shaped to compute the row budget: it is a startup
+  constant, which is what lets a virtualized renderer derive a block's height
+  from its line count alone.
   `resolve_covering` grows only the line height — metrics, cap height, and
   baselines stay the primary face's, and the returned font's `spec()` still
   reproduces it.
@@ -177,8 +179,10 @@ advice:
   `baseline_at_row_px`. The rest of the line and block geometry is read once
   and deliberately not mirrored — one `px(...)` at the call site beats a
   mirror per accessor.
-- Glyph-level fallback still needs no special handling: substituted glyphs
-  never enter a line's shaped ascent (CoreText-verified).
+- On macOS/CoreText, glyph-level fallback does not enlarge a line's shaped
+  ascent/descent. This is a line-metrics contract, not evidence that every
+  fallback glyph's typographic or raster ink fits the primary line box;
+  DirectWrite and cosmic-text still need native validation.
 - `direct_paint` example: resolve a font set once — the body style covering
   its run faces — shape and cache `WrappedLine`s, place them with the metrics
   types at that fixed row budget, and paint directly.

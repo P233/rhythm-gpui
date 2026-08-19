@@ -53,16 +53,17 @@
 //!
 //! Document renderers that shape text themselves and paint cached
 //! `WrappedLine`s skip the element layer entirely: build [`RhythmLineMetrics`]
-//! from each shaped line's real `ascent()` / `descent()` — the maxima over its
-//! explicit font runs, which is how lines mixing bold, inline code, CJK, or
-//! emoji faces actually shape — lay blocks out with [`RhythmBlockMetrics`],
-//! and place every baseline with `paint_origin_for`. Under the `gpui` feature,
-//! the four values that stay inside a paint path's `Pixels` chain have
-//! `Pixels`-typed `_px` mirrors. The `direct_paint` example is the complete
-//! non-virtualized shape/cache/paint recipe. A virtualizer additionally
-//! accumulates `first_rows` / `middle_rows` / `last_rows` in an `i64` and
-//! rebases that row cursor near the viewport before converting visible
-//! positions to `f32`.
+//! from each shaped line's reported `ascent()` / `descent()` — the maxima over
+//! its explicit font runs, which is how lines mixing bold, inline code, CJK, or
+//! emoji faces actually shape. Those are line metrics, not a guarantee that
+//! platform-selected fallback glyph ink stays inside the box. Lay blocks out
+//! with [`RhythmBlockMetrics`] and place every baseline with
+//! `paint_origin_for`. Under the `gpui` feature, the four values that stay
+//! inside a paint path's `Pixels` chain have `Pixels`-typed `_px` mirrors. The
+//! `direct_paint` example is the complete non-virtualized shape/cache/paint
+//! recipe. A virtualizer additionally accumulates `first_rows` /
+//! `middle_rows` / `last_rows` in an `i64` and rebases that row cursor near
+//! the viewport before converting visible positions to `f32`.
 //!
 //! # Performance contract
 //!

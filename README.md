@@ -317,24 +317,27 @@ cargo run --example direct_paint   # shape once, cache WrappedLines,
 ```
 
 Document renderers that shape text themselves skip the element layer: build
-`RhythmLineMetrics` from each shaped line's real `ascent()` / `descent()` —
+`RhythmLineMetrics` from each shaped line's reported `ascent()` / `descent()` —
 the maxima over its explicit font runs, which is how lines mixing bold,
 inline code, CJK, or emoji faces actually shape — lay blocks out with
 `RhythmBlockMetrics` (baseline or ink-top anchors, concrete fragment geometry,
 and exact integer row arithmetic), and place every baseline with
-`paint_origin_for(target)`. Glyph fallback needs no special handling:
-substituted glyphs never grow the line box.
+`paint_origin_for(target)`. On the validated macOS/CoreText backend,
+glyph-level fallback does not enlarge a `WrappedLine`'s `ascent()` / `descent()`;
+that describes the shaped line metrics, not a guarantee that every fallback
+glyph's typographic or raster ink stays inside the primary face's line box.
 
 Settle the row budget at catalog-build time. A style's lines can draw on more
-faces than its own — bold, inline code, an explicit CJK or emoji face, or
-whatever gpui resolves to when a family is missing — and each line shapes to
-the maxima over its runs. `RhythmFontSpec::resolve_covering(ts, &others)`
-resolves the style's font at a line height that holds any mixture of that
-same-size, same-grid set (`RhythmLineMetrics::covering` is the pure form), so
-"the line box contains the ink" is true by construction instead of checked
-per shaped line. Nothing is shaped to compute it, which is what makes a
-block's height a function of its line count — the property virtualization
-needs.
+faces than its own — bold, inline code, or an explicit CJK or emoji face — and
+each line shapes to the maxima over its explicit runs.
+`RhythmFontSpec::resolve_covering(ts, &others)` resolves the style's font at a
+line height that holds any mixture of that same-size, same-grid, caller-supplied
+set (`RhythmLineMetrics::covering` is the pure form). Each listed family still
+uses gpui's normal resolution fallback when the request is missing, but neither
+entry inspects text or discovers glyph-level fallback faces selected later by
+the platform shaper. Nothing is shaped to compute the budget, which is what
+makes a block's height a function of its line count — the property
+virtualization needs.
 
 For a dynamic, non-virtualized line whose configured height is only a floor,
 `line_metrics_at_least` remains the one-step overflow-growing path. The fixed
@@ -370,7 +373,8 @@ caches failed font requests, so clearing a caller cache after late registration
 cannot repair the miss in the same `TextSystem`. The default gpui layer is
 compile-checked on Linux and Windows. Mixed-run and glyph-fallback shaping
 semantics are CI-verified against macOS/CoreText (`tests/shaping.rs`); the
-DirectWrite and cosmic-text runtime behaviors are not yet verified.
+DirectWrite and cosmic-text runtime behaviors are not yet verified. Those
+line-metrics checks also do not establish fallback-glyph ink containment.
 
 **Tip:** as with rhythm-sass, make every text block occupy a whole number of
 rhythm units. Line heights are whole units by construction; close a

@@ -23,9 +23,10 @@
 //!
 //! Two paragraphs contain the same CJK-and-emoji text: one styles them as
 //! explicit font runs (they enter the line's shaped maxima), one leaves them
-//! to glyph fallback (they borrow the primary font's baseline and the line
-//! box does not change). Toggle nothing — the overlay shows both behaviors
-//! coexisting on one grid.
+//! to glyph fallback (on macOS/CoreText they borrow the primary font's baseline
+//! without changing the reported line metrics). This is not a proof about the
+//! fallback glyphs' raster ink. Toggle nothing — the overlay shows both metric
+//! behaviors coexisting on one grid.
 
 use std::sync::Arc;
 
@@ -149,9 +150,10 @@ impl DirectPaint {
                 bottom: 0,
             },
             // 3. Explicit mixed runs: bold, inline code, CJK, and emoji faces
-            //    enter the shaped maxima, so their ink box may be taller than
-            //    the body font's — RhythmLineMetrics reads that from the
-            //    shaped result while the covering line height stays fixed.
+            //    enter the shaped maxima, so their reported metric envelope may
+            //    be taller than the body font's — RhythmLineMetrics reads that
+            //    from the shaped result while the covering line height stays
+            //    fixed.
             Paragraph {
                 spans: vec![
                     Span("Explicit runs: ", set.body.font().clone(), ink),
@@ -169,15 +171,15 @@ impl DirectPaint {
                 top: 6,
                 bottom: 0,
             },
-            // Glyph fallback: the same scripts in a single body-font run. The
-            // substituted glyphs borrow the body baseline and the line box
-            // stays exactly the body font's — compare the two paragraphs
-            // against the overlay.
+            // Glyph fallback: the same scripts in a single body-font run. On
+            // macOS/CoreText the substituted glyphs borrow the body baseline
+            // and the reported line metrics stay exactly the body font's —
+            // compare the two paragraphs against the overlay. This does not
+            // measure the fallback glyphs' raster ink.
             Paragraph {
                 spans: vec![Span(
-                    "Glyph fallback: the same 汉字混排 and 😀 in one body-font run — the \
-                     line box does not grow, because fallback glyphs never enter the \
-                     shaped ascent.",
+                    "Glyph fallback: the same 汉字混排 and 😀 in one body-font run — on \
+                     macOS/CoreText the reported line metrics do not grow.",
                     set.body.font().clone(),
                     ink,
                 )],
