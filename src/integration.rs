@@ -459,9 +459,11 @@ impl RhythmFont {
     /// Like a cap anchor, this anchors *one* ink envelope: glyphs that reach
     /// it land on the grid line and shorter ones sit below, exactly as Latin
     /// lowercase sits below a `cap_top` anchor. Kana are the case to know
-    /// about — their dakuten ride 0.005–0.058 em above the han envelope, like
-    /// Latin ascenders above cap height — so include kana in `probes` when
-    /// setting Japanese that must not exceed the line.
+    /// about — their dakuten ride above the han envelope by up to 0.058 em on
+    /// the faces measured here, like Latin ascenders above cap height, though
+    /// the overshoot belongs to the face and some versions show none — so
+    /// include kana in `probes` when setting Japanese that must not exceed the
+    /// line.
     ///
     /// Measurement happens only at this boundary; spacing on a successful
     /// anchor stays pure geometry. Use the same [`TextSystem`] that resolved

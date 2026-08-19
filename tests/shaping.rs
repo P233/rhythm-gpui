@@ -459,17 +459,39 @@ mod suite {
             IcfMeasurementError::UnresolvedFont
         );
 
-        // Scripts whose ink is not bounded by the han envelope: kana ride
-        // above it, exactly as Latin ascenders ride above cap height. A
-        // Japanese setting therefore probes kana too.
+        // A Japanese setting probes kana too: their marks can rise above the
+        // han envelope, as Latin ascenders rise above cap height. How far they
+        // rise belongs to the installed face, and PingFang SC ships versions
+        // where they do not rise at all, so this pins the fold rather than the
+        // overshoot: the anchor must hold the tallest accepted ink over the
+        // whole probe set, whichever script contributes it.
+        let mut probe_set_top = ink_top;
+        for ch in ['ぱ', 'ポ'] {
+            let Ok(bounds) = text_system.typographic_bounds(font_id, size, ch) else {
+                println!("  {ch}: no bounds, skipped exactly as measure_icf skips it");
+                continue;
+            };
+            let bottom = f32::from(bounds.origin.y);
+            let top = f32::from(bounds.origin.y + bounds.size.height);
+            println!(
+                "  {ch}: top {:+.4} em, bottom {:+.4} em",
+                top / FONT_SIZE,
+                bottom / FONT_SIZE
+            );
+            // measure_icf accepts only ink straddling the alphabetic baseline.
+            if bottom < 0.0 && top > 0.0 {
+                probe_set_top = probe_set_top.max(top);
+            }
+        }
+
         let japanese = grid.font(text_system, font("PingFang SC"), size, 3);
         let with_kana = japanese
             .measure_icf(text_system, "字永語国ぱポ")
             .expect("kana probes resolve");
-        let kana_trim = with_kana.trim_top();
-        assert!(
-            kana_trim < trim,
-            "adding kana should raise the measured envelope, not lower it"
+        assert_close(
+            f32::from(with_kana.font().baseline_above() - with_kana.trim_top()),
+            probe_set_top,
+            "measure_icf must fold the tallest accepted ink over the whole probe set",
         );
 
         // A face with no BASE table at all still measures: the whole point of
